@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "465653082502",
+    "firebase_url": "https://muyassir-app-default-rtdb.firebaseio.com",
+    "project_id": "muyassir-app",
+    "storage_bucket": "muyassir-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:465653082502:android:fc6f9312c3ba29a1382407",
+        "android_client_info": {
+          "package_name": "com.example.muyassir"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCCnHJalkSeqJyGY9HsQv5HBLVgZr86gxM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
