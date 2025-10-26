@@ -1,132 +1,131 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-
-import 'LabTestList.dart';
-import 'UserRequestScreen.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'LabTestListProvider.dart';
+import 'Labreportcreen.dart';
+import 'LabTestListUser.dart';
+//import 'LabUserRequestScreen.dart';
+import 'UserRegistrationScreen.dart';
 import 'settings_screen.dart';
-import 'user_role.dart'; // ✅ علشان نمرر الدور
+import 'user_role.dart';
 
 class LabDashboardScreen extends StatelessWidget {
   const LabDashboardScreen({super.key});
 
+  Future<Map<String, String>> _getUserData() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return {'role': 'user', 'labId': ''};
+    final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+    if (!doc.exists) return {'role': 'user', 'labId': ''};
+    final data = doc.data() ?? {};
+    return {
+      'role': (data['role'] ?? 'user').toString(),
+      'labId': (data['labId'] ?? '').toString(),
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final theme = Theme.of(context);
 
-    final backgroundColor = isDark ? Colors.black : Colors.white;
-    final textColor = isDark ? Colors.white : Colors.black87;
+    return FutureBuilder<Map<String, String>>(
+      future: _getUserData(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        final userData = snapshot.data!;
+        final labId = userData['labId']!;
 
-    return Scaffold(
-      backgroundColor: backgroundColor,
-      appBar: AppBar(
-        title: const Text('MUYASSIR HEALTHCARE'),
-        backgroundColor: Colors.blueAccent, // ✅ يظل أزرق دايمًا
-        foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings),
-            tooltip: 'Settings',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const SettingsScreen(role: UserRole.lab), // ✅ نمرر role: lab
-                ),
-              );
-            },
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('MUYASSIR - Lab'),
+            backgroundColor: theme.colorScheme.primary,
+            foregroundColor: theme.colorScheme.onPrimary,
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.settings),
+                onPressed: () {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen(role: UserRole.lab)));
+                },
+              ),
+              IconButton(
+                icon: const Icon(Icons.logout),
+                onPressed: () async {
+                  await FirebaseAuth.instance.signOut();
+                  Navigator.pushReplacementNamed(context, '/login');
+                },
+              ),
+            ],
           ),
-          IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: 'Logout',
-            onPressed: () async {
-              await FirebaseAuth.instance.signOut();
-              Navigator.pushReplacementNamed(context, '/login');
-            },
+          body: Container(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Welcome, ${FirebaseAuth.instance.currentUser?.email ?? 'Lab'}",
+                  style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  "Manage Lab services and user visits from here.",
+                  style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onBackground.withOpacity(0.7)),
+                ),
+                const SizedBox(height: 32),
+                Expanded(
+                  child: GridView.count(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 16,
+                    children: [
+                      _buildTile(
+                        icon: Icons.science,
+                        label: 'Investigation',
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => LabTestListProvider(labId: labId),
+                            ),
+                          );
+                        },
+                      ),
+                      _buildTile(
+                        icon: Icons.assignment_turned_in,
+                        label: 'Reports',
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => Labreportcreen(labId: labId)
+                            ),
+                          );
+                        },
+                      ),
+
+                      _buildTile(
+                        icon: Icons.assignment_turned_in,
+                        label: 'User Requests',
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => UserRequestScreen(
+                                labId: labId, // معرف اللاب الحالي
+                              ),
+                            ),
+                          );
+
+
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-        ],
-      ),
-      body: Container(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              "Hello, ${user?.email ?? 'User'}",
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: textColor,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              "Welcome!",
-              style: TextStyle(fontSize: 18, color: textColor),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              "Search categories:",
-              style: TextStyle(
-                fontSize: 16,
-                color: textColor.withOpacity(0.7),
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              style: TextStyle(color: textColor),
-              decoration: InputDecoration(
-                hintText: 'Search...',
-                hintStyle: TextStyle(
-                  color: isDark ? Colors.white70 : Colors.black54,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                prefixIcon: Icon(Icons.search, color: textColor),
-                filled: true,
-                fillColor: isDark
-                    ? Colors.grey.shade800
-                    : Colors.grey.shade100,
-              ),
-            ),
-            const SizedBox(height: 32),
-            Expanded(
-              child: GridView.count(
-                crossAxisCount: 2,
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 16,
-                children: [
-                  _buildTile(
-                    icon: Icons.science,
-                    label: 'Investigation',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const LabTestList(),
-                        ),
-                      );
-                    },
-                  ),
-                  _buildTile(
-                    icon: Icons.person,
-                    label: 'User Requests',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const UserRequestScreen(),
-                        ),
-                      );
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -135,26 +134,20 @@ class LabDashboardScreen extends StatelessWidget {
     required String label,
     required VoidCallback onTap,
   }) {
-    return Material(
-      color: Colors.blue[200], // ✅ دايمًا أزرق
-      elevation: 3,
-      borderRadius: BorderRadius.circular(12),
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
-        child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 40, color: Colors.white),
+              Icon(icon, size: 40, color: Colors.deepPurple),
               const SizedBox(height: 10),
-              Text(
-                label,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
-                ),
-              ),
+              Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
             ],
           ),
         ),

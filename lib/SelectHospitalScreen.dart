@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'nursing_services_screen.dart';
+import 'UserNursingServicesScreen.dart';
 
 class SelectHospitalScreen extends StatelessWidget {
   const SelectHospitalScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final hospitalsRef = FirebaseFirestore.instance.collection('nursing_services');
-    final currentUser = FirebaseAuth.instance.currentUser;
+    final hospitalsRef = FirebaseFirestore.instance
+        .collection('users')
+        .where('providerType', isEqualTo: 'Hospital')
+        .where('status', isEqualTo: 'accepted');
 
     return Scaffold(
       appBar: AppBar(title: const Text("Select Hospital")),
@@ -24,31 +25,18 @@ class SelectHospitalScreen extends StatelessWidget {
             itemCount: hospitals.length,
             itemBuilder: (context, index) {
               final data = hospitals[index].data() as Map<String, dynamic>;
-              return Card(
-                child: ListTile(
-                  leading: data['imageUrl'] != null
-                      ? Image.network(data['imageUrl'], width: 50, height: 50, fit: BoxFit.cover)
-                      : const Icon(Icons.local_hospital, size: 50, color: Colors.blueAccent),
-                  title: Text(data['name'] ?? 'Unnamed Hospital'),
-                  subtitle: Text(data['address'] ?? ''),
-                  onTap: () async {
-                    String userRole = 'user';
-                    if (currentUser != null) {
-                      final userDoc = await FirebaseFirestore.instance
-                          .collection('users')
-                          .doc(currentUser.uid)
-                          .get();
-                      if (userDoc.exists) {
-                        userRole = (userDoc.data()?['role'] ?? 'user').toString().toLowerCase();
-                      }
-                    }
 
+              return Card(
+                margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                child: ListTile(
+                  leading: const Icon(Icons.local_hospital, size: 50, color: Colors.blueAccent),
+                  title: Text(data['companyName'] ?? 'Unnamed Hospital'),
+                  onTap: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => NursingServicesScreen(
-                          hospitalId: hospitals[index].id,
-                          userRole: userRole,
+                        builder: (_) => UserNursingServicesScreen(
+                          hospitalId: data['hospitalId'] ?? hospitals[index].id,
                         ),
                       ),
                     );

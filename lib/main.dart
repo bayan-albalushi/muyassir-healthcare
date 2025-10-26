@@ -177,7 +177,6 @@ class MuyassirApp extends StatelessWidget {
             '/': (context) => const SplashScreen(),
             '/onboarding': (context) => const OnboardingScreen(),
             '/login': (context) => const LoginScreen(),
-            '/register': (context) => const UserRegistrationScreen(),
             '/providerRegister': (context) => const ProviderRegistrationScreen(),
             '/userHome': (context) => const UserHomeScreen(),
             '/adminDashboard': (context) => const AdminDashboardScreen(),
@@ -190,7 +189,6 @@ class MuyassirApp extends StatelessWidget {
             '/forgotPassword': (context) => const ForgotPasswordScreen(),
             '/cart': (context) => const CartScreen(),
             '/hospital/userRequests': (context) => const UserRequestsScreen(),
-            '/hospital/reports': (context) => const HospitalReportsScreen(),
             '/hospital/updateVisit': (context) => const UpdateVisitScreen(),
           },
         );

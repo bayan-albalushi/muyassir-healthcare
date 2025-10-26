@@ -64,7 +64,8 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
     await ordersRef.where("userId", isEqualTo: userId).get();
 
     if (existingOrders.docs.isNotEmpty) {
-      final firstItem = existingOrders.docs.first.data() as Map<String, dynamic>;
+      final firstItem =
+      existingOrders.docs.first.data() as Map<String, dynamic>;
       final existingType =
           firstItem['providerType'] ?? firstItem['serviceType'] ?? "";
       final existingPharmacy = firstItem['pharmacyId'] ?? "";
@@ -84,7 +85,7 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
               ElevatedButton(
                 onPressed: () => Navigator.pop(ctx, true),
                 style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange),
+                    backgroundColor: Colors.blueAccent),
                 child: const Text("Start"),
               ),
             ],
@@ -112,7 +113,7 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
               ElevatedButton(
                 onPressed: () => Navigator.pop(ctx, true),
                 style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange),
+                    backgroundColor: Colors.blueAccent),
                 child: const Text("Start"),
               ),
             ],
@@ -210,7 +211,6 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
                   ? "Prescription replaced ✅"
                   : "Prescription uploaded ✅")),
         );
-        Navigator.pop(context, true);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Upload failed ❌")),
@@ -256,7 +256,6 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final data = widget.medicineData;
     final images = List<String>.from(data['images'] ?? []);
     final name = data['name'] ?? "Unknown Medicine";
@@ -269,22 +268,16 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
     final needsPrescription = prescriptionType == "required" ||
         (prescriptionType == "byQuantity" && _quantity > prescriptionLimit);
 
-    final isAddToCartEnabled =
-    !(needsPrescription && _prescriptionUrl == null);
+    final isAddToCartEnabled = !(needsPrescription && _prescriptionUrl == null);
 
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
+      backgroundColor: const Color(0xFFF9F9F9),
       appBar: AppBar(
         centerTitle: true,
-        title: Text(
-          name,
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.bold,
-            color: theme.appBarTheme.foregroundColor ?? Colors.white,
-          ),
-        ),
-        backgroundColor:
-        theme.appBarTheme.backgroundColor ?? Colors.blueAccent,
+        title: Text(name,
+            style:
+            const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+        backgroundColor: Colors.blueAccent,
         actions: [
           StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
@@ -354,29 +347,39 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: theme.cardColor,
+                color: Colors.white,
                 borderRadius: BorderRadius.circular(12),
+                boxShadow: const [
+                  BoxShadow(
+                      color: Colors.black12, blurRadius: 4, offset: Offset(0, 2))
+                ],
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(name,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold)),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 18)),
                   if (description.isNotEmpty)
                     Text("Description: $description",
-                        style: theme.textTheme.bodyMedium),
-                  Text("Stock: $stock", style: theme.textTheme.bodyMedium),
+                        style:
+                        const TextStyle(color: Colors.black54, fontSize: 14)),
+                  const SizedBox(height: 8),
+                  Text("Stock: $stock",
+                      style:
+                      const TextStyle(color: Colors.black87, fontSize: 14)),
                   Text("Unit Price: ${price.toStringAsFixed(3)} OMR",
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.bold, color: Colors.green)),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blueAccent,
+                          fontSize: 15)),
                   const SizedBox(height: 12),
                   if (needsPrescription)
                     Container(
                       margin: const EdgeInsets.only(top: 8),
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: theme.colorScheme.secondaryContainer,
+                        color: Colors.blue.shade50,
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: _prescriptionUrl == null
@@ -384,27 +387,29 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
                         onPressed: () => uploadPrescription(),
                         icon: const Icon(Icons.upload_file),
                         label: const Text("UPLOAD PRESCRIPTION"),
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blueAccent,
+                            foregroundColor: Colors.white),
                       )
                           : Row(
-                        mainAxisAlignment:
-                        MainAxisAlignment.spaceEvenly,
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
                           ElevatedButton(
                             onPressed: viewPrescription,
                             style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.green),
+                                backgroundColor: Colors.blueAccent),
                             child: Text(
                               _prescriptionUrl!.endsWith(".pdf")
                                   ? "VIEW PDF"
                                   : "VIEW IMAGE",
-                              style: const TextStyle(
-                                  color: Colors.white),
+                              style:
+                              const TextStyle(color: Colors.white),
                             ),
                           ),
                           ElevatedButton(
                             onPressed: removePrescription,
                             style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.red),
+                                backgroundColor: Colors.grey),
                             child: const Text("REMOVE",
                                 style: TextStyle(color: Colors.white)),
                           ),
@@ -412,7 +417,7 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
                             onPressed: () =>
                                 uploadPrescription(replace: true),
                             style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.orange),
+                                backgroundColor: Colors.blueAccent),
                             child: const Text("REPLACE",
                                 style: TextStyle(color: Colors.white)),
                           ),
@@ -426,7 +431,7 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
                       Row(children: [
                         IconButton(
                           icon: const Icon(Icons.remove_circle,
-                              color: Colors.red),
+                              color: Colors.blueAccent),
                           onPressed: _quantity > 1
                               ? () {
                             setState(() => _quantity--);
@@ -435,11 +440,11 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
                               : null,
                         ),
                         Text("$_quantity",
-                            style: theme.textTheme.bodyLarge?.copyWith(
-                                fontWeight: FontWeight.bold)),
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 16)),
                         IconButton(
                           icon: const Icon(Icons.add_circle,
-                              color: Colors.blue),
+                              color: Colors.blueAccent),
                           onPressed: _quantity < stock
                               ? () {
                             setState(() => _quantity++);
@@ -449,8 +454,9 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
                         ),
                       ]),
                       Text("${(price * _quantity).toStringAsFixed(3)} OMR",
-                          style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.bold)),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87)),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -460,20 +466,16 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
                       onPressed: isAddToCartEnabled ? addToCart : null,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: isAddToCartEnabled
-                            ? theme.primaryColor
+                            ? Colors.blueAccent
                             : Colors.grey,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12)),
                       ),
-                      child: Text(
+                      child: const Text(
                         "ADD TO CART",
-                        style: theme.textTheme.bodyLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: isAddToCartEnabled
-                              ? Colors.white
-                              : Colors.black54,
-                        ),
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, color: Colors.white),
                       ),
                     ),
                   ),

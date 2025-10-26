@@ -5,7 +5,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
+
 import 'ServiceBookingInvoiceScreen.dart';
+
+
 
 class HospitalCheckoutScreen extends StatefulWidget {
   final double total;
@@ -34,7 +37,6 @@ class _HospitalCheckoutScreenState extends State<HospitalCheckoutScreen> {
   final _cvcController = TextEditingController();
 
   String _paymentMethod = "cash";
-  final double serviceFee = 0.000;
   LatLng _selectedLocation = LatLng(23.5880, 58.3829);
   String? _address;
   DateTime? _selectedDate;
@@ -42,18 +44,73 @@ class _HospitalCheckoutScreenState extends State<HospitalCheckoutScreen> {
   String? _selectedTimeSlot;
 
   final List<String> _timeSlots = [
-    '8:00 AM - 10:00 AM',
-    '10:00 AM - 2:00 PM',
-    '2:00 PM - 6:00 PM',
-    '6:00 PM - 9:00 PM',
+    '08:00 AM - 10:00 AM',
+    '10:00 AM - 02:00 PM',
+    '02:00 PM - 06:00 PM',
+    '06:00 PM - 09:00 PM',
   ];
 
-  Future<void> _getAddressFromLatLng(LatLng position) async {
+  // ================== Card Validators ==================
+  String? validateCardNumber(String? value) {
+    if (value == null || value.isEmpty) return "Card number required";
+    if (!RegExp(r'^\d{16}$').hasMatch(value)) return "Card must be 16 digits";
+    if (RegExp(r'^0+$').hasMatch(value)) return "Card cannot be all zeros";
+    return null;
+  }
+
+  String? validateExpiry(String? value) {
+    if (value == null || value.isEmpty) return "Expiry date required";
+    if (!RegExp(r'^(0[1-9]|1[0-2])\/\d{2}$').hasMatch(value)) return "Invalid format MM/YY";
+    try {
+      final parts = value.split('/');
+      final month = int.parse(parts[0]);
+      final year = int.parse(parts[1]) + 2000;
+      final lastDay = DateTime(year, month + 1, 0);
+      if (lastDay.isBefore(DateTime.now())) return "Card expired";
+    } catch (_) {
+      return "Invalid expiry date";
+    }
+    return null;
+  }
+
+  String? validateCVC(String? value) {
+    if (value == null || value.isEmpty) return "CVC required";
+    if (!RegExp(r'^\d{3,4}$').hasMatch(value)) return "CVC must be 3-4 digits";
+    if (RegExp(r'^0+$').hasMatch(value)) return "CVC cannot be all zeros";
+    return null;
+  }
+
+  // ================== Service Fee ==================
+  double getServiceFee() {
+    const feePerService = 0.500;
+    final totalFee = widget.services.length * feePerService;
+    return totalFee < 1.0 ? 1.0 : totalFee;
+  }
+
+  List<String> getAvailableTimeSlots(DateTime selectedDate) {
+    final now = DateTime.now();
+    if (selectedDate.year == now.year &&
+        selectedDate.month == now.month &&
+        selectedDate.day == now.day) {
+      return _timeSlots.where((slot) {
+        final parts = slot.split(' - ');
+        final startParts = parts[0].split(':');
+        int hour = int.parse(startParts[0]);
+        if (parts[0].contains('PM') && hour != 12) hour += 12;
+        final minute = int.parse(startParts[1].split(' ')[0]);
+        final slotTime = DateTime(now.year, now.month, now.day, hour, minute);
+        return slotTime.isAfter(now);
+      }).toList();
+    }
+    return _timeSlots;
+  }
+
+  Future<void> _getAddressFromLatLng(LatLng pos) async {
     final url = Uri.parse(
-        "https://nominatim.openstreetmap.org/reverse?format=json&lat=${position.latitude}&lon=${position.longitude}&zoom=18&addressdetails=1&accept-language=en");
-    final response = await http.get(url, headers: {"User-Agent": "hospital_app"});
-    if (response.statusCode == 200) {
-      setState(() => _address = jsonDecode(response.body)["display_name"]);
+        "https://nominatim.openstreetmap.org/reverse?format=json&lat=${pos.latitude}&lon=${pos.longitude}&zoom=18&addressdetails=1&accept-language=en");
+    final res = await http.get(url, headers: {"User-Agent": "hospital_app"});
+    if (res.statusCode == 200) {
+      setState(() => _address = jsonDecode(res.body)["display_name"]);
     }
   }
 
@@ -68,10 +125,9 @@ class _HospitalCheckoutScreenState extends State<HospitalCheckoutScreen> {
     if (picked != null) setState(() => _selectedDate = picked);
   }
 
+  // ================== Place Order ==================
   Future<void> _placeOrder() async {
-    // ✅ Validate all fields first
     if (!_formKey.currentState!.validate()) return;
-
     if (_selectedDate == null || _selectedTimeSlot == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -86,7 +142,7 @@ class _HospitalCheckoutScreenState extends State<HospitalCheckoutScreen> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("You must be logged in to continue ❌")),
+        const SnackBar(content: Text("You must be logged in ❌")),
       );
       return;
     }
@@ -94,17 +150,24 @@ class _HospitalCheckoutScreenState extends State<HospitalCheckoutScreen> {
     setState(() => _isPlacing = true);
 
     try {
-      final bookingData = {
-        'hospitalId': widget.hospitalId,
+      final serviceFee = getServiceFee();
+      final totalWithFee = widget.total + serviceFee;
+
+      // ✅ Add booking
+      final docRef = await FirebaseFirestore.instance.collection('hospitalBookings').add({
+        'providerType': 'hospital',
+        'providerId': widget.hospitalId,
         'userId': user.uid,
         'userEmail': user.email,
         'services': widget.services,
         'total': widget.total,
+        'serviceFee': serviceFee,
+        'totalWithFee': totalWithFee,
         'status': 'Pending',
         'paymentMethod': _paymentMethod,
-        'paymentDone': _paymentMethod == 'cash' ? false : true,
+        'paymentStatus': _paymentMethod == 'cash' ? 'unpaid' : 'awaiting_approval',
         'createdAt': FieldValue.serverTimestamp(),
-        'scheduledAt': Timestamp.fromDate(_selectedDate!),
+        'appointmentDate': Timestamp.fromDate(_selectedDate!),
         'timeSlot': _selectedTimeSlot,
         'address': _address ?? '',
         'location': {
@@ -113,42 +176,80 @@ class _HospitalCheckoutScreenState extends State<HospitalCheckoutScreen> {
         },
         'notes': widget.notes ?? '',
         'phone': _phoneController.text.trim(),
-      };
-
-      final docRef = await FirebaseFirestore.instance
-          .collection('hospitalBookings')
-          .add(bookingData);
-
-      // Also store in user_requests for provider visibility
-      await FirebaseFirestore.instance.collection('user_requests').add({
-        ...bookingData,
-        'bookingId': docRef.id,
-        'timestamp': FieldValue.serverTimestamp(),
       });
 
+      // ✅ Delete related orders
+      final ordersSnapshot = await FirebaseFirestore.instance
+          .collection('orders')
+          .where('userId', isEqualTo: user.uid)
+          .where('hospitalId', isEqualTo: widget.hospitalId)
+          .get();
+
+      for (final doc in ordersSnapshot.docs) {
+        await doc.reference.delete();
+      }
+
+      widget.services.clear();
+
+      // ✅ Show messages based on payment method
+      if (_paymentMethod == 'card') {
+        // Step 1: show approval wait message
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("⏳ Please wait for admin approval..."),
+            duration: Duration(seconds: 2),
+          ),
+        );
+
+        // Step 2: simulate short delay
+        await Future.delayed(const Duration(seconds: 3));
+
+        // Step 3: show withdrawal message
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("💳 Once approved, payment will be withdrawn from your card."),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("✅ Appointment placed successfully! Please pay on appointment."),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+
+      // ✅ Navigate to invoice
       if (!mounted) return;
+      await Future.delayed(const Duration(seconds: 1));
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
           builder: (_) => ServiceBookingInvoiceScreen(
             bookingId: docRef.id,
             hospitalId: widget.hospitalId,
-            total: widget.total,
+            total: totalWithFee,
             phone: _phoneController.text.trim(),
             paymentMethod: _paymentMethod,
           ),
         ),
       );
+
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error placing booking: $e")));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text("Error: $e")));
     } finally {
       if (mounted) setState(() => _isPlacing = false);
     }
   }
 
+
+
+  // ================== UI ==================
   @override
   Widget build(BuildContext context) {
+    final serviceFee = getServiceFee();
     final totalWithFee = widget.total + serviceFee;
 
     return Scaffold(
@@ -163,180 +264,125 @@ class _HospitalCheckoutScreenState extends State<HospitalCheckoutScreen> {
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
           child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildSummaryRow("Services Total:",
-                    "${widget.total.toStringAsFixed(3)} OMR"),
-                _buildSummaryRow(
-                    "Service Fee:", "${serviceFee.toStringAsFixed(3)} OMR"),
-                const Divider(),
-                _buildSummaryRow("Total Payable:",
-                    "${totalWithFee.toStringAsFixed(3)} OMR",
-                    isBold: true),
-                const SizedBox(height: 20),
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildSummaryRow("Services Total:", "${widget.total.toStringAsFixed(3)} OMR"),
+              _buildSummaryRow("Service Fee:", "${serviceFee.toStringAsFixed(3)} OMR"),
+              const Divider(),
+              _buildSummaryRow("Total Payable:", "${totalWithFee.toStringAsFixed(3)} OMR", isBold: true),
+              const SizedBox(height: 20),
 
-                // ✅ Map section
-                SizedBox(
-                  height: 200,
-                  child: FlutterMap(
-                    options: MapOptions(
-                      initialCenter: _selectedLocation,
-                      initialZoom: 13,
-                      onTap: (tapPosition, point) {
-                        setState(() => _selectedLocation = point);
-                        _getAddressFromLatLng(point);
-                      },
+              // Map Section
+              SizedBox(
+                height: 200,
+                child: FlutterMap(
+                  options: MapOptions(
+                    initialCenter: _selectedLocation,
+                    initialZoom: 13,
+                    onTap: (tapPosition, point) {
+                      setState(() => _selectedLocation = point);
+                      _getAddressFromLatLng(point);
+                    },
+                  ),
+                  children: [
+                    TileLayer(
+                      urlTemplate: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+                      subdomains: ['a', 'b', 'c'],
                     ),
-                    children: [
-                      TileLayer(
-                        urlTemplate:
-                        "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-                        subdomains: ['a', 'b', 'c', 'd'],
+                    MarkerLayer(markers: [
+                      Marker(
+                        point: _selectedLocation,
+                        width: 40,
+                        height: 40,
+                        child: const Icon(Icons.location_pin, color: Colors.red, size: 40),
                       ),
-                      MarkerLayer(markers: [
-                        Marker(
-                          point: _selectedLocation,
-                          width: 40,
-                          height: 40,
-                          child: const Icon(Icons.location_pin,
-                              color: Colors.red, size: 40),
-                        ),
-                      ]),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(_address ??
-                    "Lat: ${_selectedLocation.latitude}, Lng: ${_selectedLocation.longitude}"),
-                const SizedBox(height: 20),
-
-                // ✅ Date picker
-                ListTile(
-                  title: Text(_selectedDate == null
-                      ? "Select appointment date"
-                      : "Date: ${_selectedDate!.day}-${_selectedDate!.month}-${_selectedDate!.year}"),
-                  trailing:
-                  const Icon(Icons.calendar_today, color: Colors.blue),
-                  onTap: () => _pickDate(context),
-                ),
-
-                const SizedBox(height: 10),
-                const Text("Select appointment time slot",
-                    style:
-                    TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-                Column(
-                  children: _timeSlots.map((slot) {
-                    return RadioListTile<String>(
-                      title: Text(slot),
-                      value: slot,
-                      groupValue: _selectedTimeSlot,
-                      onChanged: (value) =>
-                          setState(() => _selectedTimeSlot = value),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: 12),
-
-                // ✅ Phone
-                _buildTextField(
-                  _phoneController,
-                  "Enter your phone number",
-                  TextInputType.phone,
-                      (value) {
-                    if (value == null || value.isEmpty) {
-                      return "Phone number is required";
-                    }
-                    if (!RegExp(r'^[279][0-9]{7}$').hasMatch(value)) {
-                      return "Phone must start with 2, 7, or 9 and be 8 digits";
-                    }
-                    return null;
-                  },
-                ),
-
-                const SizedBox(height: 12),
-
-                // ✅ Payment dropdown
-                DropdownButtonFormField<String>(
-                  value: _paymentMethod,
-                  items: const [
-                    DropdownMenuItem(
-                        value: "cash", child: Text("Cash on Appointment")),
-                    DropdownMenuItem(
-                        value: "card", child: Text("Credit/Debit Card")),
+                    ]),
                   ],
-                  onChanged: (v) => setState(() => _paymentMethod = v ?? "cash"),
-                  decoration: InputDecoration(
-                    filled: true,
-                    fillColor: Colors.white,
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                  ),
                 ),
-                const SizedBox(height: 12),
+              ),
+              const SizedBox(height: 10),
+              Text(_address ?? "Lat: ${_selectedLocation.latitude}, Lng: ${_selectedLocation.longitude}"),
 
-                if (_paymentMethod == "card") ...[
-                  _buildTextField(
-                      _cardNameController,
-                      "Card Name",
-                      TextInputType.text,
-                          (v) =>
-                      v == null || v.isEmpty ? "Card name required" : null),
-                  _buildTextField(
-                      _cardNumberController,
-                      "Card Number",
-                      TextInputType.number, (v) {
-                    if (v == null || v.isEmpty) return "Card number required";
-                    if (!RegExp(r'^[0-9]{16}$').hasMatch(v)) {
-                      return "Card must be 16 digits";
-                    }
-                    return null;
-                  }),
-                  Row(children: [
-                    Expanded(
-                      child: _buildTextField(
-                          _expiryController, "MM/YY", TextInputType.text, (v) {
-                        if (v == null || v.isEmpty)
-                          return "Expiry date required";
-                        if (!RegExp(r'^(0[1-9]|1[0-2])\/\\d{2}$')
-                            .hasMatch(v)) return "Invalid format MM/YY";
-                        return null;
-                      }),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _buildTextField(_cvcController, "CVC",
-                          TextInputType.number, (v) {
-                            if (v == null || v.isEmpty) return "CVC required";
-                            if (!RegExp(r'^[0-9]{3,4}$').hasMatch(v)) {
-                              return "CVC must be 3-4 digits";
-                            }
-                            return null;
-                          }),
-                    ),
-                  ]),
+              const SizedBox(height: 20),
+              ListTile(
+                title: Text(_selectedDate == null
+                    ? "Select appointment date"
+                    : "Date: ${_selectedDate!.day}-${_selectedDate!.month}-${_selectedDate!.year}"),
+                trailing: const Icon(Icons.calendar_today, color: Colors.blue),
+                onTap: () => _pickDate(context),
+              ),
+
+              const SizedBox(height: 10),
+              const Text("Select appointment time slot",
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+              Column(
+                children: (_selectedDate != null ? getAvailableTimeSlots(_selectedDate!) : _timeSlots)
+                    .map((slot) => RadioListTile<String>(
+                  title: Text(slot),
+                  value: slot,
+                  groupValue: _selectedTimeSlot,
+                  onChanged: (value) => setState(() => _selectedTimeSlot = value),
+                ))
+                    .toList(),
+              ),
+              const SizedBox(height: 12),
+
+              _buildTextField(
+                _phoneController,
+                "Enter your phone number",
+                TextInputType.phone,
+                    (v) {
+                  if (v == null || v.isEmpty) return "Phone number is required";
+                  if (!RegExp(r'^[279][0-9]{7}$').hasMatch(v)) {
+                    return "Phone must start with 2, 7, or 9 and be 8 digits";
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 12),
+
+              DropdownButtonFormField<String>(
+                value: _paymentMethod,
+                items: const [
+                  DropdownMenuItem(value: "cash", child: Text("Cash on Appointment")),
+                  DropdownMenuItem(value: "card", child: Text("Credit/Debit Card")),
                 ],
+                onChanged: (v) => setState(() => _paymentMethod = v ?? "cash"),
+                decoration: InputDecoration(
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
 
-                const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _isPlacing ? null : _placeOrder,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                    ),
-                    child: _isPlacing
-                        ? const CircularProgressIndicator(color: Colors.white)
-                        : const Text("CONFIRM APPOINTMENT",
-                        style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white)),
+              if (_paymentMethod == "card") ...[
+                _buildTextField(_cardNameController, "Card Name", TextInputType.text,
+                        (v) => v == null || v.isEmpty ? "Card name required" : null),
+                _buildTextField(_cardNumberController, "Card Number", TextInputType.number, validateCardNumber),
+                _buildTextField(_expiryController, "MM/YY", TextInputType.text, validateExpiry),
+                _buildTextField(_cvcController, "CVC", TextInputType.number, validateCVC),
+              ],
+
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _isPlacing ? null : _placeOrder,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: _isPlacing
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : const Text(
+                    "CONFIRM APPOINTMENT",
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
                   ),
                 ),
-              ]),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -344,19 +390,15 @@ class _HospitalCheckoutScreenState extends State<HospitalCheckoutScreen> {
 
   Widget _buildSummaryRow(String label, String value, {bool isBold = false}) {
     return Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label,
-              style: TextStyle(
-                  fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
-          Text(value,
-              style: TextStyle(
-                  fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
-        ]);
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: TextStyle(fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
+        Text(value, style: TextStyle(fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
+      ],
+    );
   }
 
-  Widget _buildTextField(TextEditingController c, String hint,
-      TextInputType type, String? Function(String?) validator) {
+  Widget _buildTextField(TextEditingController c, String hint, TextInputType type, String? Function(String?) validator) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: TextFormField(

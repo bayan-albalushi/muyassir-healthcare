@@ -2,18 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fl_chart/fl_chart.dart';
 
-class HospitalReportsScreen extends StatelessWidget {
-  final String hospitalId;
-  const HospitalReportsScreen({super.key, required this.hospitalId});
+class Labreportcreen extends StatelessWidget {
+  final String labId;
+  const Labreportcreen({super.key, required this.labId});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF7F9FC),
       appBar: AppBar(
-        backgroundColor: Colors.teal,
+        backgroundColor: Colors.deepPurple,
         title: const Text(
-          'Hospital Reports',
+          'Lab Reports',
           style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
         ),
         centerTitle: true,
@@ -21,9 +21,9 @@ class HospitalReportsScreen extends StatelessWidget {
       ),
       body: StreamBuilder(
         stream: FirebaseFirestore.instance
-            .collection('hospitalBookings')
-            .where('providerId', isEqualTo: hospitalId)
-            .where('providerType', isEqualTo: 'hospital')
+            .collection('placedOrders')
+            .where('labId', isEqualTo: labId)
+            .where('providerType', isEqualTo: 'lab')
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -35,7 +35,7 @@ class HospitalReportsScreen extends StatelessWidget {
           if (bookings.isEmpty) {
             return const Center(
               child: Text(
-                'No hospital booking data available.',
+                'No lab booking data available.',
                 style: TextStyle(fontSize: 16, color: Colors.black54),
               ),
             );
@@ -97,7 +97,7 @@ class HospitalReportsScreen extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
-            color: Colors.teal.withOpacity(0.3),
+            color: Colors.deepPurple.withOpacity(0.3),
             blurRadius: 8,
             offset: const Offset(0, 4),
           ),

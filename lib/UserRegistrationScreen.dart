@@ -1,283 +1,174 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'encrypt_helper.dart'; // AES encryption helper
-class UserRegistrationScreen extends StatefulWidget {
-  const UserRegistrationScreen({super.key});
-  @override
-  State<UserRegistrationScreen> createState() => _UserRegistrationScreenState();
-}
-class _UserRegistrationScreenState extends State<UserRegistrationScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final nameController = TextEditingController();
-  final lastNameController = TextEditingController();
-  final emailController = TextEditingController();
-  final phoneController = TextEditingController();
-  final passwordController = TextEditingController();
-  final confirmPasswordController = TextEditingController();
-  final streetController = TextEditingController();
-  final houseController = TextEditingController();
-  final addressController = TextEditingController();
-  bool isLoading = false;
-  String? errorMessage;
-  String? gender;
-  String? validateNotEmpty(String? value, String fieldName) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Enter $fieldName';
-    }
-    return null;
-  }
-  Future<bool> isEmailAlreadyRegistered(String email) async {
-    try {
-      final methods = await FirebaseAuth.instance.fetchSignInMethodsForEmail(email);
-      return methods.isNotEmpty;
-    } catch (e) {
-      return false;
-    }
-  }
-  Future<void> registerUser() async {
-    if (!_formKey.currentState!.validate() || gender == null) {
-      setState(() {
-        errorMessage = gender == null ? 'Please select gender' : null;
-      });
-      return;
-    }
-    setState(() {
-      isLoading = true;
-      errorMessage = null;
-    });
-    try {
-      final email = emailController.text.trim();
-      final password = passwordController.text.trim();
-      final emailInUse = await isEmailAlreadyRegistered(email);
-      if (emailInUse) {
-        setState(() {
-          isLoading = false;
-          errorMessage = 'Email is already registered';
-        });
-        return;
-      }
-      final encryptedPassword = encryptText(password);
-      // ✅ إنشاء الحساب بكلمة مرور دامي
-      final userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-      await FirebaseFirestore.instance.collection('users').doc(userCredential.user!.uid).set({
-        'firstName': nameController.text.trim(),
-        'lastName': lastNameController.text.trim(),
-        'email': email,
-        'phone': phoneController.text.trim(),
-        'role': 'user',
-        'gender': gender,
-        'streetNumber': streetController.text.trim(),
-        'houseNumber': houseController.text.trim(),
-        'address': addressController.text.trim(),
-        'createdAt': FieldValue.serverTimestamp(),
-        'encryptedPassword': encryptedPassword,
-      });
-      Navigator.pushReplacementNamed(context, '/login');
-    } on FirebaseAuthException catch (e) {
-      setState(() => errorMessage = e.message);
-    } catch (e) {
-      setState(() => errorMessage = 'Unexpected error: $e');
-    } finally {
-      setState(() => isLoading = false);
-    }
-  }
+import 'package:intl/intl.dart';
+
+class UserRequestScreen extends StatelessWidget {
+  final String labId;
+  const UserRequestScreen({super.key, required this.labId});
 
   @override
   Widget build(BuildContext context) {
+    final CollectionReference requestsCollection =
+    FirebaseFirestore.instance.collection('placedOrders');
+
     return Scaffold(
-      appBar: AppBar(  title: const Text('User Registration'),
-        backgroundColor: Colors.blueAccent,
-        foregroundColor: Colors.black,  elevation: 0,),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Colors.blueAccent, Colors.lightBlueAccent],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.teal.shade100,
-                    blurRadius: 10,
-                    offset: const Offset(0, 6),
-                  )
-                ],
+      appBar: AppBar(
+        title: const Text('User Requests'),
+        backgroundColor: Colors.deepPurple,
+      ),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: requestsCollection
+            .where('labId', isEqualTo: labId)
+            .orderBy('timestamp', descending: true)
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Center(child: Text('Error: ${snapshot.error}'));
+          }
+
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final docs = snapshot.data!.docs;
+          if (docs.isEmpty) {
+            return const Center(
+              child: Text(
+                'No user requests found.',
+                style: TextStyle(fontSize: 20),
               ),
-              child: Form(
-                key: _formKey,
+            );
+          }
+
+          return ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: docs.length,
+            itemBuilder: (context, index) {
+              final doc = docs[index];
+              final request = doc.data()! as Map<String, dynamic>;
+              return _buildRequestCard(context, doc.id, request);
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildRequestCard(
+      BuildContext context, String docId, Map<String, dynamic> request) {
+    final deliveryDate = (request['deliveryDate'] as Timestamp?)?.toDate();
+    final timestamp = (request['timestamp'] as Timestamp?)?.toDate();
+
+    final formattedDate = deliveryDate != null
+        ? DateFormat('dd-MM-yyyy').format(deliveryDate)
+        : 'N/A';
+
+    final items = [request]; // ضع الـ request نفسه داخل قائمة واحدة
+
+
+    final status = request['status'] ?? 'pending';
+
+    return Card(
+      color: Colors.lightBlue[50],
+      margin: const EdgeInsets.only(bottom: 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      elevation: 3,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Order ID: $docId",
+              style: const TextStyle(fontSize: 14, color: Colors.grey),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Total: ${request['total'] ?? 0} OMR',
+              style: const TextStyle(
+                  fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87),
+            ),
+            const SizedBox(height: 6),
+            Text('Address: ${request['address'] ?? 'N/A'}'),
+            Text('Delivery Date: $formattedDate'),
+            Text('Delivery Slot: ${request['deliverySlot'] ?? 'N/A'}'),
+            Text('Status: $status', style: const TextStyle(fontWeight: FontWeight.bold)),
+            const Divider(height: 20),
+            const Text('Items:',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ...items.map((item) {
+              final instructions = (item['instructions'] as List<dynamic>?)
+                  ?.map((e) => e.toString())
+                  .toList() ?? [];
+
+              return Container(
+                margin: const EdgeInsets.symmetric(vertical: 6),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.blue[100],
+                  borderRadius: BorderRadius.circular(10),
+                ),
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text("Register as User", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 20),
-                    TextFormField(
-                      controller: nameController,
-                      decoration: const InputDecoration(labelText: 'First Name', prefixIcon: Icon(Icons.person), border: OutlineInputBorder()),
-                      validator: (v) => validateNotEmpty(v, 'first name'),
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: lastNameController,
-                      decoration: const InputDecoration(labelText: 'Last Name', prefixIcon: Icon(Icons.person), border: OutlineInputBorder()),
-                      validator: (v) => validateNotEmpty(v, 'last name'),
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: emailController,
-                      decoration: const InputDecoration(labelText: 'Email', prefixIcon: Icon(Icons.email), border: OutlineInputBorder()),
-                      validator: (v) => validateNotEmpty(v, 'email'),
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: phoneController,
-                      keyboardType: TextInputType.phone,
-                      decoration: const InputDecoration(labelText: 'Phone', prefixIcon: Icon(Icons.phone), border: OutlineInputBorder()),
-                      validator: (v) {
-                        if (v == null || v.trim().isEmpty) return 'Enter phone number';
-                        if (!RegExp(r'^[972]\d{7}$').hasMatch(v.trim())) {
-                          return 'Phone number must be 8 digits and start with 9, 7, or 2';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: passwordController,
-                      obscureText: true,
-                      decoration: const InputDecoration(labelText: 'Password', prefixIcon: Icon(Icons.lock), border: OutlineInputBorder()),
-                      validator: (v) {
-                        if (v == null || v.trim().isEmpty) return 'Enter password';
-                        if (v.length < 8) return 'Password must be at least 8 characters';
-                        if (!RegExp(r'^(?=.*[A-Za-z])(?=.*\d)(?=.*[!@#\$&*~]).{8,}$').hasMatch(v)) {
-                          return 'Enter a stronger password';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 16),
-
-                    TextFormField(
-                      controller: confirmPasswordController,
-                      obscureText: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Confirm Password',
-                        prefixIcon: Icon(Icons.lock_outline),
-                        border: OutlineInputBorder(),
-                      ),
-                      validator: (v) {
-                        if (v == null || v.trim().isEmpty) return 'Confirm your password';
-                        if (v.trim() != passwordController.text.trim()) return 'Passwords do not match';
-                        return null;
-                      },
-                    ),
-
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: streetController,
-                      decoration: const InputDecoration(labelText: 'Street Number', border: OutlineInputBorder(), prefixIcon: Icon(Icons.location_city)),
-                      validator: (v) {
-                        if (v == null || v.trim().isEmpty) return 'Enter street number';
-                        if (!RegExp(r'^\d+$').hasMatch(v.trim())) return 'Street number must be digits only';
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: houseController,
-                      decoration: const InputDecoration(labelText: 'House Number', border: OutlineInputBorder(), prefixIcon: Icon(Icons.home)),
-                      validator: (v) {
-                        if (v == null || v.trim().isEmpty) return 'Enter house number';
-                        if (!RegExp(r'^[a-zA-Z0-9]+$').hasMatch(v.trim())) return 'House number must be letters and numbers only';
-                        return null;
-
-                      },
-
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: addressController,
-                      decoration: const InputDecoration(labelText: 'Address', border: OutlineInputBorder(), prefixIcon: Icon(Icons.map)),
-                      validator: (v) {
-                        if (v == null || v.trim().isEmpty) return 'Enter address';
-                        if (v.length > 100) return 'Address too long';
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 16),
-
-                    const Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text("Gender", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                    ),
-                    RadioListTile<String>(
-                      title: const Text("Male"),
-                      value: 'Male',
-                      groupValue: gender,
-                      onChanged: (value) => setState(() => gender = value),
-                    ),
-                    RadioListTile<String>(
-                      title: const Text("Female"),
-                      value: 'Female',
-                      groupValue: gender,
-                      onChanged: (value) => setState(() => gender = value),
-                    ),
-
-                    if (errorMessage != null)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Text(errorMessage!, style: const TextStyle(color: Colors.red)),
-                      ),
-
-                    const SizedBox(height: 16),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: ElevatedButton.icon(
-                        onPressed: () {
-                          // TODO: إضافة ميزة الموقع لاحقًا
-                        },
-                        icon: const Icon(Icons.location_on),
-                        label: const Text('Add Location'),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: isLoading ? null : registerUser,
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
-                        child: isLoading
-                            ? const CircularProgressIndicator(color: Colors.white)
-                            : const Text('Register', style: TextStyle(color: Colors.white)),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextButton(
-                      onPressed: () => Navigator.pushNamed(context, '/providerRegister'),
-                      child: const Text("Are you a Provider? Register here"),
-                    ),
-                    TextButton(
-                      onPressed: () => Navigator.pushNamed(context, '/login'),
-                      child: const Text("Already have an account? Login"),
-                    ),
+                    Text(item['testName'] ?? 'Unknown', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    Text('Price: ${item['price'] ?? 0} OMR x ${item['quantity'] ?? 1}'),
+                    if (instructions.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      const Text('Instructions:', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ...instructions.map((inst) => Text("• $inst")),
+                    ],
                   ],
                 ),
+              );
+            }).toList(),
+
+
+            const SizedBox(height: 10),
+            if (timestamp != null)
+              Text(
+                'Requested At: ${timestamp.toLocal().toString().split('.')[0]}',
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
               ),
-            ),
-          ),
+            const SizedBox(height: 10),
+
+            // ✅ أزرار القبول / الرفض تظهر فقط إذا كانت الحالة pending
+            if (status == 'pending')
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  ElevatedButton(
+                    onPressed: () => _updateStatus(docId, 'approved'),
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8))),
+                    child: const Text('Accept'),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: () => _updateStatus(docId, 'rejected'),
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8))),
+                    child: const Text('Reject'),
+                  ),
+                ],
+              ),
+          ],
         ),
       ),
     );
+  }
+
+  Future<void> _updateStatus(String docId, String newStatus) async {
+    final requestsCollection = FirebaseFirestore.instance.collection('placedOrders');
+    try {
+      await requestsCollection.doc(docId).update({'status': newStatus});
+      print('Request $newStatus!');
+    } catch (e) {
+      print('Error updating status: $e');
+    }
   }
 }

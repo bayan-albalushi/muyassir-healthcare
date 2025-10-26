@@ -59,6 +59,9 @@ dependencies:
   path_provider: ^2.1.2
   latlong2: ^0.9.1
   flutter_map: ^7.0.2
+  timezone: ^0.9.4
+  fake_cloud_firestore: ^2.5.2
+
 
 
 

@@ -26,6 +26,8 @@ class InvoiceScreen extends StatelessWidget {
         return Colors.green.shade400;
       case 'pending':
         return Colors.orangeAccent;
+      case 'pendingapproval': // ✅ مضافة من شغل زميلتك
+        return Colors.orange;
       case 'processing':
         return Colors.blueGrey;
       case 'on_delivery':
@@ -162,7 +164,8 @@ class InvoiceScreen extends StatelessWidget {
                           paymentStatus.toLowerCase() == "authorized")
                           ? "refunded"
                           : (status.toLowerCase() == "approved" &&
-                          paymentStatus.toLowerCase() == "authorized")
+                          paymentStatus.toLowerCase() ==
+                              "authorized")
                           ? "captured"
                           : paymentStatus;
 
@@ -211,33 +214,14 @@ class InvoiceScreen extends StatelessWidget {
                                     style: TextStyle(
                                         fontWeight: FontWeight.bold,
                                         color: textColor)),
-                                subtitle: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      effectivePaymentStatus.toUpperCase(),
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        color: _paymentColor(effectivePaymentStatus),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    if (effectivePaymentStatus.toLowerCase() == "captured")
-                                      Text("💳 The amount has been charged to your card.",
-                                          style: TextStyle(color: textColor)),
-                                    if (effectivePaymentStatus.toLowerCase() == "refunded")
-                                      Text("💳 The amount has been refunded to your card.",
-                                          style: TextStyle(color: textColor)),
-                                    if (effectivePaymentStatus.toLowerCase() == "pending_cash")
-                                      Text("💵 You will pay in cash upon delivery.",
-                                          style: TextStyle(color: textColor)),
-                                    if (effectivePaymentStatus.toLowerCase() == "authorized")
-                                      Text("⏳ The amount is authorized and waiting for pharmacy approval.",
-                                          style: TextStyle(color: textColor)),
-                                  ],
+                                subtitle: Text(
+                                  effectivePaymentStatus.toUpperCase(),
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: _paymentColor(effectivePaymentStatus),
+                                  ),
                                 ),
                               ),
-
 
                               if (deliveryDate != null)
                                 ListTile(
@@ -272,7 +256,7 @@ class InvoiceScreen extends StatelessWidget {
                               ),
                               const Divider(),
 
-                              // ✅ Items لكل Order
+                              // ✅ Items لكل Order حسب نوع الـ Provider
                               StreamBuilder<QuerySnapshot>(
                                 stream: FirebaseFirestore.instance
                                     .collection('placedOrders')
@@ -292,28 +276,66 @@ class InvoiceScreen extends StatelessWidget {
                                     children: items.map((doc) {
                                       final data =
                                       doc.data() as Map<String, dynamic>;
-                                      final name =
-                                          data['medicineName'] ?? "Unknown";
+                                      final providerType =
+                                          data['providerType'] ?? 'pharmacy';
                                       final qty = data['quantity'] ?? 1;
                                       final price =
                                       (data['price'] ?? 0).toDouble();
 
-                                      return ListTile(
-                                        leading: const Icon(Icons.medication,
-                                            color: Colors.blueAccent),
-                                        title: Text(name,
-                                            style: TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                color: textColor)),
-                                        subtitle: Text("Quantity: $qty",
-                                            style:
-                                            TextStyle(color: textColor)),
-                                        trailing: Text(
-                                            "${(price * qty).toStringAsFixed(3)} OMR",
-                                            style: TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                color: textColor)),
-                                      );
+                                      if (providerType == "pharmacy") {
+                                        return ListTile(
+                                          leading: const Icon(Icons.medication,
+                                              color: Colors.blueAccent),
+                                          title: Text(
+                                              data['medicineName'] ??
+                                                  "Unknown Medicine",
+                                              style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  color: textColor)),
+                                          subtitle: Text("Quantity: $qty",
+                                              style:
+                                              TextStyle(color: textColor)),
+                                          trailing: Text(
+                                              "${(price * qty).toStringAsFixed(3)} OMR",
+                                              style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  color: textColor)),
+                                        );
+                                      } else if (providerType == "hospital") {
+                                        return ListTile(
+                                          leading: const Icon(
+                                              Icons.local_hospital,
+                                              color: Colors.redAccent),
+                                          title: Text(
+                                              data['name'] ??
+                                                  "Unknown Hospital Service",
+                                              style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  color: textColor)),
+                                          trailing: Text(
+                                              "${(price * qty).toStringAsFixed(3)} OMR",
+                                              style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  color: textColor)),
+                                        );
+                                      } else if (providerType == "lab") {
+                                        return ListTile(
+                                          leading: const Icon(Icons.biotech,
+                                              color: Colors.deepPurple),
+                                          title: Text(
+                                              data['testName'] ??
+                                                  "Unknown Lab Test",
+                                              style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  color: textColor)),
+                                          trailing: Text(
+                                              "${(price * qty).toStringAsFixed(3)} OMR",
+                                              style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  color: textColor)),
+                                        );
+                                      }
+                                      return const SizedBox.shrink();
                                     }).toList(),
                                   );
                                 },
