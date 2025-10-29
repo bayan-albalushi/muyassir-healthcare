@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'user_home_screen.dart'; // adjust path if needed
-
+import 'user_home_screen.dart';
 class ServiceBookingInvoiceScreen extends StatelessWidget {
   final String bookingId;
   final String hospitalId;
@@ -38,10 +37,10 @@ class ServiceBookingInvoiceScreen extends StatelessWidget {
   Future<String> _getHospitalName(String hospitalId) async {
     try {
       final doc = await FirebaseFirestore.instance
-          .collection('hospitals')
+          .collection('users')
           .doc(hospitalId)
           .get();
-      return doc.data()?['name'] ?? 'Unknown Hospital';
+      return doc.data()?['companyName'] ?? 'Unknown Hospital';
     } catch (_) {
       return 'Unknown Hospital';
     }
@@ -249,7 +248,7 @@ class ServiceBookingInvoiceScreen extends StatelessWidget {
                     else
                       Column(
                         children: services.map((service) {
-                          final name = service['name'] ?? 'Unnamed Service';
+                          final name = service['serviceName'] ?? 'Unnamed Service';
                           final parent =
                               service['parentService'] ?? service['parent'] ?? 'General';
                           final price = _parsePrice(service['price']);

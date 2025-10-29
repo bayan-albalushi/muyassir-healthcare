@@ -2,16 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'LabTestListUser.dart';
 import 'cart_screen.dart';
-/*
+
+
 class LabsScreen extends StatelessWidget {
-  const LabsScreen({super.key, required String labId});
+  const LabsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Available Labs"),
-        backgroundColor: Colors.teal,
+        backgroundColor: Colors.blue[400],
         actions: [
           IconButton(
             icon: const Icon(Icons.shopping_cart),
@@ -19,8 +20,7 @@ class LabsScreen extends StatelessWidget {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => CartScreen(
-                      labId:''
+                  builder: (_) => const CartScreen(
                   ),
                 ),
               );
@@ -60,7 +60,7 @@ class LabsScreen extends StatelessWidget {
               return Card(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: ListTile(
-                  leading: const Icon(Icons.biotech, color: Colors.teal),
+                  leading: const Icon(Icons.biotech, color: Colors.blue),
                   title: Text(labName),
                   subtitle: Text(labEmail),
                   trailing: const Icon(Icons.arrow_forward_ios, size: 18),
@@ -82,4 +82,3 @@ class LabsScreen extends StatelessWidget {
     );
   }
 }
-*/

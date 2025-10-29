@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'cart_screen.dart';
-/*
+
 class LabTestListUser extends StatefulWidget {
   final String labId;
 
@@ -25,7 +25,6 @@ class _LabTestListUserState extends State<LabTestListUser> {
   @override
   void initState() {
     super.initState();
-    //_fetchCartItems();
   }
 
   Future<void> _fetchCartItems() async {
@@ -37,8 +36,9 @@ class _LabTestListUserState extends State<LabTestListUser> {
 
     setState(() {
       cartTestNames =
-          snapshot.docs.map((doc) => doc['testName'] as String).toList();
-      cartLabId = snapshot.docs.isNotEmpty ? snapshot.docs.first['labId'] : null;
+          snapshot.docs.map((doc) => doc['name'] as String).toList();
+      cartLabId =
+      snapshot.docs.isNotEmpty ? snapshot.docs.first['labId'] : null;
     });
   }
 
@@ -46,17 +46,24 @@ class _LabTestListUserState extends State<LabTestListUser> {
     final user = auth.currentUser;
     if (user == null) return;
 
-    // ✅ تحديث cartLabId من السلة الحالية
+    // 🔹 Get current cart
     final currentCart = await ordersCollection
         .where('userId', isEqualTo: user.uid)
         .get();
 
-    cartLabId = currentCart.docs.isNotEmpty ? currentCart.docs.first['labId'] : null;
-    cartTestNames = currentCart.docs.map((doc) => doc['testName'] as String).toList();
+    cartTestNames = currentCart.docs
+        .map((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      return data['name'] as String? ?? '';
+    })
+        .where((name) => name.isNotEmpty)
+        .toList();
 
+    cartLabId = currentCart.docs.isNotEmpty
+        ? (currentCart.docs.first.data() as Map<String, dynamic>)['labId']
+        : null;
 
-
-    // 🔹 حالة السلة من لاب آخر
+    // 🔹 Check if cart is from another lab
     if (cartLabId != null && cartLabId != widget.labId) {
       final shouldReplace = await showDialog<bool>(
         context: context,
@@ -79,10 +86,8 @@ class _LabTestListUserState extends State<LabTestListUser> {
 
       if (shouldReplace != true) return;
 
-      // 🔹 حذف كل العناصر القديمة
-      final oldItems =
-      await ordersCollection.where('userId', isEqualTo: user.uid).get();
-      for (var doc in oldItems.docs) {
+      // 🔹 Remove old items
+      for (var doc in currentCart.docs) {
         await ordersCollection.doc(doc.id).delete();
       }
 
@@ -90,13 +95,13 @@ class _LabTestListUserState extends State<LabTestListUser> {
       cartLabId = null;
     }
 
-    // 🔹 منع التكرار
+    // 🔹 Prevent duplicates
     if (cartTestNames.contains(test['name'])) return;
 
-    // 🔹 إضافة التست الجديد
+    // 🔹 Add new test
     await ordersCollection.add({
       'userId': user.uid,
-      'testName': test['name'] ?? '',
+      'name': test['name'] ?? '',
       'description': test['description'] ?? '',
       'instructions': test['instructions'] ?? [],
       'price': (test['price'] ?? 0).toDouble(),
@@ -114,8 +119,7 @@ class _LabTestListUserState extends State<LabTestListUser> {
       cartLabId = widget.labId;
     });
 
-
-    // 🔹 رسالة تأكيد
+    // 🔹 Confirmation dialog
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -131,7 +135,7 @@ class _LabTestListUserState extends State<LabTestListUser> {
               Navigator.pop(context);
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => CartScreen(labId: widget.labId)),
+                MaterialPageRoute(builder: (_) => CartScreen()),
               );
             },
             child: const Text("Go to Cart"),
@@ -141,68 +145,73 @@ class _LabTestListUserState extends State<LabTestListUser> {
     );
   }
 
+
   @override
   Widget build(BuildContext context) {
     final labId = widget.labId;
 
     return Scaffold(
-        appBar: AppBar(
-          title: const Text('Lab Tests'),
-          backgroundColor: Colors.teal,
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.shopping_cart),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => CartScreen(labId: widget.labId),
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
-        body: StreamBuilder<QuerySnapshot>(
-          stream: testsCollection
-              .where('labId', isEqualTo: labId)
-              .orderBy('createdAt', descending: true)
-              .snapshots(),
-          builder: (context, testSnapshot) {
-            if (!testSnapshot.hasData) return const Center(child: CircularProgressIndicator());
+      appBar: AppBar(
+        title: const Text('Lab Tests'),
+        backgroundColor: Colors.blue[400],
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.shopping_cart),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => CartScreen()),
+              );
+            },
+          ),
+        ],
+      ),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: testsCollection
+            .where('labId', isEqualTo: labId)
+            .orderBy('createdAt', descending: true)
+            .snapshots(),
+        builder: (context, testSnapshot) {
+          if (!testSnapshot.hasData)
+            return const Center(child: CircularProgressIndicator());
 
-            final tests = testSnapshot.data!.docs.map((doc) {
-              final map = doc.data() as Map<String, dynamic>;
-              map['id'] = doc.id; // مهم لو تحتاج الـ docId
-              return map;
-            }).toList();
+          final tests = testSnapshot.data!.docs.map((doc) {
+            final map = doc.data() as Map<String, dynamic>;
+            map['id'] = doc.id;
+            return map;
+          }).toList();
 
-            return StreamBuilder<QuerySnapshot>(
-              stream: ordersCollection
-                  .where('userId', isEqualTo: auth.currentUser!.uid)
-                  .snapshots(),
-              builder: (context, cartSnapshot) {
-                if (!cartSnapshot.hasData) return const Center(child: CircularProgressIndicator());
+          return StreamBuilder<QuerySnapshot>(
+            stream: ordersCollection
+                .where('userId', isEqualTo: auth.currentUser!.uid)
+                .snapshots(),
+            builder: (context, cartSnapshot) {
+              if (!cartSnapshot.hasData)
+                return const Center(child: CircularProgressIndicator());
 
-                final cartTestNames = cartSnapshot.data!.docs
-                    .map((doc) => doc['testName'] as String)
-                    .toList();
+              final cartTestNames = cartSnapshot.data!.docs
+                  .map((doc) {
+                final data = doc.data() as Map<String, dynamic>;
+                return data['name'] ?? data['testName'] ?? '';
+              })
+                  .where((name) => name.isNotEmpty)
+                  .toList();
 
-                return ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: tests.length,
-                  itemBuilder: (context, index) {
-                    final test = tests[index];
-                    final isInCart = cartTestNames.contains(test['name']);
 
-                    return _buildTestCard(test, isInCart);
-                  },
-                );
-              },
-            );
-          },
-        )
+              return ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: tests.length,
+                itemBuilder: (context, index) {
+                  final test = tests[index];
+                  final isInCart = cartTestNames.contains(test['name']);
 
+                  return _buildTestCard(test, isInCart);
+                },
+              );
+            },
+          );
+        },
+      ),
     );
   }
 
@@ -213,38 +222,45 @@ class _LabTestListUserState extends State<LabTestListUser> {
       margin: const EdgeInsets.symmetric(vertical: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.green[50],
+        color: Colors.grey[200],
         borderRadius: BorderRadius.circular(12),
         boxShadow: const [
-          BoxShadow(color: Colors.teal, blurRadius: 4, offset: Offset(0, 2))
+          BoxShadow(color: Colors.grey, blurRadius: 4, offset: Offset(0, 2))
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(test['name'] ?? '',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              style:
+              const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           if ((test['description'] ?? '').isNotEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 4),
               child: Text(test['description'] ?? '',
-                  style: const TextStyle(fontSize: 14, color: Colors.black87)),
+                  style:
+                  const TextStyle(fontSize: 14, color: Colors.black87)),
             ),
           if (instructions.isNotEmpty) ...[
             const SizedBox(height: 6),
             const Text('Instructions:',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                style:
+                TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
             const SizedBox(height: 4),
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                  color: Colors.teal, borderRadius: BorderRadius.circular(8)),
+                  color: Colors.blue[200],
+                  borderRadius: BorderRadius.circular(8)),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: instructions
                     .map((i) => Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [const Text("• "), Expanded(child: Text(i))],
+                  children: [
+                    const Text("• "),
+                    Expanded(child: Text(i))
+                  ],
                 ))
                     .toList(),
               ),
@@ -257,10 +273,12 @@ class _LabTestListUserState extends State<LabTestListUser> {
               ElevatedButton(
                 onPressed: isInCart ? null : () => _addToCart(test),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: isInCart ? Colors.black : Colors.teal,
+                  backgroundColor:
+                  isInCart ? Colors.black : Colors.blue[400],
                 ),
                 child: Text(isInCart ? "In Cart" : "Add to Cart"),
               ),
+
             ],
           ),
         ],
@@ -268,4 +286,4 @@ class _LabTestListUserState extends State<LabTestListUser> {
     );
   }
 }
-*/
+ 

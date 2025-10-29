@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import 'medicine_detail_screen.dart';
-import 'cart_screen.dart'; // ✅ استدعاء صفحة الكارت
+import 'cart_screen.dart'; // Page that displays the user's cart
 
 class OrderMedicineScreen extends StatefulWidget {
   final String pharmacyId;
@@ -20,28 +20,55 @@ class OrderMedicineScreen extends StatefulWidget {
 }
 
 class _OrderMedicineScreenState extends State<OrderMedicineScreen> {
+  // Used to store the search input
   String _searchText = "";
 
-  // ✅ إضافة للسلة مع check إذا المنتج موجود + شرط نوع المزود
+  // --------------------------- //
+  // Main function to add an item to the cart
+  // Handles stock checking, prescription logic, and cart consistency
+  // --------------------------- //
   Future<void> addToCart(String medicineId) async {
     final userId = FirebaseAuth.instance.currentUser!.uid;
     final ordersRef = FirebaseFirestore.instance.collection('orders');
 
+    // Get the medicine data from Firestore
     final medicineDoc = await FirebaseFirestore.instance
         .collection('medicines')
         .doc(medicineId)
         .get();
     final medicineData = medicineDoc.data() ?? {};
 
-    // ✅ نشيك إذا الكارت فيه أي منتجات
-    final existingOrders = await ordersRef.where("userId", isEqualTo: userId).get();
+    final prescriptionType = medicineData['prescriptionType'] ?? 'none';
+    final prescriptionLimit = (medicineData['prescriptionLimit'] ?? 0).toInt();
+
+    // If this medicine requires a prescription, open the details screen instead
+    if (prescriptionType == "required" ||
+        (prescriptionType == "byQuantity" && prescriptionLimit > 0)) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => MedicineDetailScreen(
+            medicineData: medicineData,
+            pharmacyId: widget.pharmacyId,
+            medicineId: medicineId,
+          ),
+        ),
+      );
+      return; // Stop here, don’t add directly
+    }
+
+    // Check if the user already has an existing cart
+    final existingOrders =
+    await ordersRef.where("userId", isEqualTo: userId).get();
 
     if (existingOrders.docs.isNotEmpty) {
-      final firstItem = existingOrders.docs.first.data() as Map<String, dynamic>;
-      final existingType = firstItem['providerType'] ?? firstItem['serviceType'] ?? "";
+      final firstItem =
+      existingOrders.docs.first.data() as Map<String, dynamic>;
+      final existingType =
+          firstItem['providerType'] ?? firstItem['serviceType'] ?? "";
       final existingPharmacy = firstItem['pharmacyId'] ?? "";
 
-      // ✅ لو فيه hospital items
+      // If user already has hospital services in cart, ask for confirmation
       if (existingType == "hospital") {
         final confirm = await showDialog<bool>(
           context: context,
@@ -56,22 +83,25 @@ class _OrderMedicineScreenState extends State<OrderMedicineScreen> {
               ),
               ElevatedButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+                style:
+                ElevatedButton.styleFrom(backgroundColor: Colors.blue[400]),
                 child: const Text("Start"),
               ),
             ],
           ),
         );
 
+        // If the user cancels, just return
         if (confirm != true) return;
 
-        // 🗑️ نحذف كل شي قديم
+        // Clear the existing cart
         for (var doc in existingOrders.docs) {
           await doc.reference.delete();
         }
-      }
-      // ✅ لو فيه pharmacy ثانية
-      else if (existingType == "pharmacy" && existingPharmacy != widget.pharmacyId) {
+
+        // If cart contains items from another pharmacy, also confirm before clearing
+      } else if (existingType == "pharmacy" &&
+          existingPharmacy != widget.pharmacyId) {
         final confirm = await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
@@ -85,7 +115,8 @@ class _OrderMedicineScreenState extends State<OrderMedicineScreen> {
               ),
               ElevatedButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+                style:
+                ElevatedButton.styleFrom(backgroundColor: Colors.blue[400]),
                 child: const Text("Start"),
               ),
             ],
@@ -94,32 +125,45 @@ class _OrderMedicineScreenState extends State<OrderMedicineScreen> {
 
         if (confirm != true) return;
 
-        // 🗑️ نحذف كل شي قديم
         for (var doc in existingOrders.docs) {
           await doc.reference.delete();
         }
       }
     }
 
-    // ✅ نضيف الـ providerType مع البيانات
+    // Now, add the medicine only if it doesn’t require a prescription
     final existingOrder = await ordersRef
         .where("userId", isEqualTo: userId)
         .where("medicineId", isEqualTo: medicineId)
         .limit(1)
         .get();
 
+    // If this item already exists in the cart, just increase its quantity
     if (existingOrder.docs.isNotEmpty) {
-      final docId = existingOrder.docs.first.id;
-      final currentQty = existingOrder.docs.first['quantity'] ?? 1;
+      final doc = existingOrder.docs.first;
+      final docId = doc.id;
+      final currentQty = doc['quantity'] ?? 1;
+      final stock = medicineData['stock'] ?? 0;
 
+      // Prevent user from adding more than available stock
+      if (currentQty >= stock) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(
+                  "Cannot add more than available stock ($stock).")),
+        );
+        return;
+      }
+
+      // Update the quantity and timestamp
       await ordersRef.doc(docId).update({
         "quantity": currentQty + 1,
         "timestamp": FieldValue.serverTimestamp(),
       });
-    } else {
-      final requiresApproval = medicineData['requiresApproval'] ?? false;
 
-      await ordersRef.add({
+      // Otherwise, create a new order document
+    } else {
+      final newDoc = await ordersRef.add({
         "userId": userId,
         "pharmacyId": widget.pharmacyId,
         "medicineId": medicineId,
@@ -128,13 +172,20 @@ class _OrderMedicineScreenState extends State<OrderMedicineScreen> {
         "images": medicineData['images'] ?? [],
         "stock": medicineData['stock'] ?? 0,
         "quantity": 1,
-        "requiresApproval": requiresApproval,
-        "status": requiresApproval ? "waiting_approval" : "pending",
+        "requiresApproval": medicineData['requiresApproval'] ?? false,
+        "status": "pending",
         "timestamp": FieldValue.serverTimestamp(),
-        "providerType": "pharmacy", // ✅ عشان نقدر نميز نوع الطلب
+        "providerType": "pharmacy",
+        "prescriptionType": prescriptionType,
+        "prescriptionLimit": prescriptionLimit,
+        "prescriptions": [],
       });
+
+      // Store the auto-generated document ID as cartId
+      await newDoc.update({"cartId": newDoc.id});
     }
 
+    // Show success dialog after item is added
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -160,15 +211,20 @@ class _OrderMedicineScreenState extends State<OrderMedicineScreen> {
     );
   }
 
+  // --------------------------- //
+  // UI Section (Building the page)
+  // --------------------------- //
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
+    // Dynamic colors for dark / light mode
     final backgroundColor =
     isDark ? Colors.grey.shade900 : const Color(0xFFE3F2FD);
     final cardColor = isDark ? Colors.grey.shade800 : Colors.white;
     final textColor = isDark ? Colors.white : Colors.black87;
-    final appBarColor = isDark ? Colors.grey.shade900 : Colors.blueAccent;
+    final appBarColor = isDark ? Colors.grey.shade900 : Colors.blue[400]
+    ;
 
     final userId = FirebaseAuth.instance.currentUser!.uid;
 
@@ -187,8 +243,10 @@ class _OrderMedicineScreenState extends State<OrderMedicineScreen> {
         backgroundColor: appBarColor,
         elevation: 4,
         actions: [
+          // Open the cart when the icon is pressed
           IconButton(
-            icon: const Icon(Icons.shopping_cart, color: Colors.white, size: 28),
+            icon: const Icon(Icons.shopping_cart,
+                color: Colors.white, size: 28),
             onPressed: () {
               Navigator.push(
                 context,
@@ -198,9 +256,13 @@ class _OrderMedicineScreenState extends State<OrderMedicineScreen> {
           ),
         ],
       ),
+
+      // Page content
       body: Column(
         children: [
-          // 🔍 Search bar
+          // --------------------------- //
+          // Search Bar (filters medicines in real time)
+          // --------------------------- //
           Padding(
             padding: const EdgeInsets.all(12.0),
             child: TextField(
@@ -227,7 +289,9 @@ class _OrderMedicineScreenState extends State<OrderMedicineScreen> {
 
           const SizedBox(height: 10),
 
-          // 🧪 Medicines Grid
+          // --------------------------- //
+          // Medicine List (real-time Firestore stream)
+          // --------------------------- //
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
@@ -239,7 +303,11 @@ class _OrderMedicineScreenState extends State<OrderMedicineScreen> {
                   return const Center(child: CircularProgressIndicator());
                 }
 
+                // Filter out deleted medicines and apply search
                 final docs = snapshot.data!.docs.where((doc) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  return data['isDeleted'] != true;
+                }).where((doc) {
                   final data = doc.data() as Map<String, dynamic>;
                   final name = (data['name'] ?? "").toString().toLowerCase();
                   return name.contains(_searchText);
@@ -247,10 +315,16 @@ class _OrderMedicineScreenState extends State<OrderMedicineScreen> {
 
                 if (docs.isEmpty) {
                   return Center(
-                      child: Text("No medicines available.",
-                          style: TextStyle(color: textColor)));
+                    child: Text(
+                      "No medicines available.",
+                      style: TextStyle(color: textColor),
+                    ),
+                  );
                 }
 
+                // --------------------------- //
+                // Build the grid of medicine cards
+                // --------------------------- //
                 return GridView.builder(
                   padding: const EdgeInsets.all(12),
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -270,6 +344,7 @@ class _OrderMedicineScreenState extends State<OrderMedicineScreen> {
                     final prescriptionLimit = data['prescriptionLimit'] ?? 0;
                     final medicineId = docs[index].id;
 
+                    // Listen to cart updates for this medicine
                     return StreamBuilder<QuerySnapshot>(
                       stream: FirebaseFirestore.instance
                           .collection('orders')
@@ -284,11 +359,12 @@ class _OrderMedicineScreenState extends State<OrderMedicineScreen> {
                               orderSnapshot.data!.docs.first['quantity'] ?? 0;
                         }
 
+                        // Check prescription limit
                         bool overLimit = prescriptionType == "byQuantity" &&
                             prescriptionLimit > 0 &&
                             currentQty >= prescriptionLimit;
 
-                        // 🟢 نحدد حالة الـ Badge (فقط Available أو Sold Out)
+                        // Decide the badge status (Available / Sold out)
                         String badgeText = "Available";
                         Color badgeColor = Colors.blueAccent;
 
@@ -297,10 +373,12 @@ class _OrderMedicineScreenState extends State<OrderMedicineScreen> {
                           badgeColor = Colors.red;
                         }
 
-                        // 🟢 الزر
                         bool needsPrescription =
                             prescriptionType == "required" || overLimit;
 
+                        // --------------------------- //
+                        // Medicine card design
+                        // --------------------------- //
                         return Stack(
                           children: [
                             Container(
@@ -317,7 +395,7 @@ class _OrderMedicineScreenState extends State<OrderMedicineScreen> {
                               ),
                               child: Column(
                                 children: [
-                                  // 🔹 الصف العلوي (VIEW MORE)
+                                  // View details shortcut
                                   Padding(
                                     padding: const EdgeInsets.symmetric(
                                         horizontal: 8, vertical: 6),
@@ -350,7 +428,7 @@ class _OrderMedicineScreenState extends State<OrderMedicineScreen> {
                                     ),
                                   ),
 
-                                  // 🖼 صورة
+                                  // Medicine image
                                   Expanded(
                                     child: Container(
                                       alignment: Alignment.center,
@@ -367,7 +445,7 @@ class _OrderMedicineScreenState extends State<OrderMedicineScreen> {
                                     ),
                                   ),
 
-                                  // 📋 الاسم
+                                  // Medicine name
                                   Padding(
                                     padding: const EdgeInsets.symmetric(
                                         horizontal: 8, vertical: 4),
@@ -384,7 +462,7 @@ class _OrderMedicineScreenState extends State<OrderMedicineScreen> {
                                     ),
                                   ),
 
-                                  // 💰 السعر
+                                  // Medicine price
                                   Text(
                                     "${price.toStringAsFixed(3)} OMR",
                                     style: TextStyle(
@@ -396,7 +474,7 @@ class _OrderMedicineScreenState extends State<OrderMedicineScreen> {
                                     ),
                                   ),
 
-                                  // ✅ الزر
+                                  // Add to cart button
                                   Padding(
                                     padding: const EdgeInsets.all(8.0),
                                     child: SizedBox(
@@ -406,8 +484,6 @@ class _OrderMedicineScreenState extends State<OrderMedicineScreen> {
                                         onPressed: null,
                                         style: ElevatedButton.styleFrom(
                                           backgroundColor:
-                                          Colors.grey[600],
-                                          disabledBackgroundColor:
                                           Colors.grey[600],
                                           padding:
                                           const EdgeInsets.symmetric(
@@ -423,23 +499,28 @@ class _OrderMedicineScreenState extends State<OrderMedicineScreen> {
                                         ),
                                       )
                                           : ElevatedButton.icon(
-                                        onPressed: needsPrescription
-                                            ? () {
-                                          Navigator.push(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (_) =>
-                                                  MedicineDetailScreen(
-                                                    medicineData: data,
-                                                    pharmacyId: widget
-                                                        .pharmacyId,
-                                                    medicineId:
-                                                    medicineId,
-                                                  ),
-                                            ),
-                                          );
-                                        }
-                                            : () => addToCart(medicineId),
+                                        onPressed: () {
+                                          if (prescriptionType ==
+                                              "required" ||
+                                              (prescriptionType ==
+                                                  "byQuantity" &&
+                                                  prescriptionLimit > 0)) {
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) =>
+                                                    MedicineDetailScreen(
+                                                      medicineData: data,
+                                                      pharmacyId:
+                                                      widget.pharmacyId,
+                                                      medicineId: medicineId,
+                                                    ),
+                                              ),
+                                            );
+                                          } else {
+                                            addToCart(medicineId);
+                                          }
+                                        },
                                         icon: Icon(
                                           needsPrescription
                                               ? Icons.warning
@@ -457,15 +538,17 @@ class _OrderMedicineScreenState extends State<OrderMedicineScreen> {
                                             color: Colors.white,
                                           ),
                                         ),
-                                        style: ElevatedButton.styleFrom(
+                                        style:
+                                        ElevatedButton.styleFrom(
                                           backgroundColor:
                                           needsPrescription
                                               ? Colors.orange
-                                              : Colors.blueAccent,
+                                              : Colors.blue[400],
                                           padding:
                                           const EdgeInsets.symmetric(
                                               vertical: 12),
-                                          shape: RoundedRectangleBorder(
+                                          shape:
+                                          RoundedRectangleBorder(
                                             borderRadius:
                                             BorderRadius.circular(8),
                                           ),
@@ -477,7 +560,7 @@ class _OrderMedicineScreenState extends State<OrderMedicineScreen> {
                               ),
                             ),
 
-                            // 🔖 Badge فوق الكارد
+                            // Small badge on top (Available / Sold out)
                             Positioned(
                               top: 10,
                               right: 10,

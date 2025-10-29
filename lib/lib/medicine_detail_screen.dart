@@ -5,7 +5,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
+import 'theme_notifier.dart';
 
+// This page shows full details about one medicine.
+// User can view info, upload prescription, change quantity, and add to cart.
 class MedicineDetailScreen extends StatefulWidget {
   final Map<String, dynamic> medicineData;
   final String pharmacyId;
@@ -23,18 +26,20 @@ class MedicineDetailScreen extends StatefulWidget {
 }
 
 class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
-  int _quantity = 1;
-  int _currentPage = 0;
+  int _quantity = 1; // default quantity
+  int _currentPage = 0; // image slider index
   final PageController _pageController = PageController();
-  String? _prescriptionUrl;
-  String? _orderId;
+  String? _prescriptionUrl; // holds uploaded prescription link
+  String? _orderId; // to track order in Firestore
 
   @override
   void initState() {
     super.initState();
-    _loadExistingOrder();
+    _loadExistingOrder(); // load order if user already added this medicine
   }
 
+  // This function checks Firestore for an existing order for this medicine.
+  // If found, it loads its quantity and prescription data.
   Future<void> _loadExistingOrder() async {
     final userId = FirebaseAuth.instance.currentUser!.uid;
     final ordersRef = FirebaseFirestore.instance.collection('orders');
@@ -56,13 +61,17 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
     }
   }
 
+  // Adds or updates the current order in Firestore.
+  // Checks for mixed cart types (hospital/lab/pharmacy) before adding.
   Future<void> _updateOrder({bool forceAdd = false}) async {
     final userId = FirebaseAuth.instance.currentUser!.uid;
     final ordersRef = FirebaseFirestore.instance.collection('orders');
 
+    // Check existing orders for same user
     final existingOrders =
     await ordersRef.where("userId", isEqualTo: userId).get();
 
+    // Check if user already has hospital/lab items in cart
     if (existingOrders.docs.isNotEmpty) {
       final firstItem =
       existingOrders.docs.first.data() as Map<String, dynamic>;
@@ -70,6 +79,7 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
           firstItem['providerType'] ?? firstItem['serviceType'] ?? "";
       final existingPharmacy = firstItem['pharmacyId'] ?? "";
 
+      // if cart has hospital/lab items, confirm before clearing
       if (existingType == "hospital" || existingType == "lab") {
         final confirm = await showDialog<bool>(
           context: context,
@@ -93,11 +103,13 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
         );
         if (confirm != true) return;
 
+        // delete old cart items
         for (var doc in existingOrders.docs) {
           await doc.reference.delete();
         }
       }
 
+      // If cart is from another pharmacy, confirm before clearing
       if (existingType == "pharmacy" && existingPharmacy != widget.pharmacyId) {
         final confirm = await showDialog<bool>(
           context: context,
@@ -127,6 +139,7 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
       }
     }
 
+    // If we already have this medicine order, update it instead of adding new
     if (_orderId != null && !forceAdd) {
       final docSnap = await ordersRef.doc(_orderId!).get();
 
@@ -143,6 +156,7 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
       }
     }
 
+    // Create new order if not found
     final docRef = await ordersRef.add({
       "userId": userId,
       "pharmacyId": widget.pharmacyId,
@@ -165,6 +179,7 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
     setState(() => _orderId = docRef.id);
   }
 
+  // Uploads file to Cloudinary (either image or PDF) and returns the uploaded link.
   Future<String?> uploadFileToCloudinary(PlatformFile file) async {
     try {
       final isImage = file.extension
@@ -190,6 +205,8 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
     return null;
   }
 
+  // Lets user choose a prescription image or PDF and upload it to Cloudinary.
+  // Once uploaded, it updates the Firestore order with the link.
   Future<void> uploadPrescription({bool replace = false}) async {
     final result = await FilePicker.platform.pickFiles(
       withData: true,
@@ -219,6 +236,7 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
     }
   }
 
+  // Removes existing prescription from Firestore and UI.
   void removePrescription() async {
     setState(() => _prescriptionUrl = null);
     await _updateOrder();
@@ -227,6 +245,7 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
     );
   }
 
+  // Opens the uploaded prescription for viewing (PDF or image).
   void viewPrescription() {
     final isPdf = _prescriptionUrl!.toLowerCase().endsWith(".pdf");
     Navigator.push(
@@ -244,18 +263,23 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
     );
   }
 
+  // Main add-to-cart function.
+  // Refreshes order info to prevent duplicates before updating Firestore.
   Future<void> addToCart() async {
+    await _loadExistingOrder(); // make sure _orderId is up to date
     await _updateOrder(forceAdd: _orderId == null);
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text("🔄 Cart Updated")),
     );
 
-    Navigator.pop(context, true);
+    Navigator.pop(context, true); // go back to previous page
   }
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     final data = widget.medicineData;
     final images = List<String>.from(data['images'] ?? []);
     final name = data['name'] ?? "Unknown Medicine";
@@ -265,20 +289,28 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
     final prescriptionType = data['prescriptionType'] ?? "none";
     final prescriptionLimit = data['prescriptionLimit'] ?? 0;
 
+    // check if this medicine requires a prescription
     final needsPrescription = prescriptionType == "required" ||
         (prescriptionType == "byQuantity" && _quantity > prescriptionLimit);
 
-    final isAddToCartEnabled = !(needsPrescription && _prescriptionUrl == null);
+    // disable add to cart when stock is 0 or prescription not uploaded
+    final isAddToCartEnabled = stock > 0 &&
+        !(needsPrescription && _prescriptionUrl == null);
+
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF9F9F9),
+      backgroundColor: isDark
+          ? Colors.black
+          : const Color(0xFFE3F2FD), // أزرق فاتح مثل صفحة الإشارة
+
       appBar: AppBar(
         centerTitle: true,
         title: Text(name,
-            style:
-            const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-        backgroundColor: Colors.blueAccent,
+            style: const TextStyle(
+                fontWeight: FontWeight.bold, color: Colors.white)),
+        backgroundColor: Colors.blue[400],
         actions: [
+          // show live cart icon with count of items
           StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
                 .collection('orders')
@@ -297,6 +329,7 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
                       Navigator.pushNamed(context, "/cart");
                     },
                   ),
+                  // red badge for cart count
                   if (cartCount > 0)
                     Positioned(
                       right: 6,
@@ -327,6 +360,7 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // image carousel for medicine
             if (images.isNotEmpty)
               SizedBox(
                 height: 220,
@@ -343,15 +377,39 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
                   ),
                 ),
               ),
+
+// ✅ add this new part below:
+            if (images.isNotEmpty)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(images.length, (index) {
+                  return Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _currentPage == index
+                          ? Colors.grey
+                          : Colors.grey.withOpacity(0.4),
+                    ),
+                  );
+                }),
+              ),
+
             const SizedBox(height: 16),
+
+            // medicine info container
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: isDark ? Colors.grey.shade900 : Colors.white,
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: const [
                   BoxShadow(
-                      color: Colors.black12, blurRadius: 4, offset: Offset(0, 2))
+                      color: Colors.black12,
+                      blurRadius: 4,
+                      offset: Offset(0, 2))
                 ],
               ),
               child: Column(
@@ -362,48 +420,56 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
                           fontWeight: FontWeight.bold, fontSize: 18)),
                   if (description.isNotEmpty)
                     Text("Description: $description",
-                        style:
-                        const TextStyle(color: Colors.black54, fontSize: 14)),
+                        style: TextStyle(
+                            color:
+                            isDark ? Colors.white60 : Colors.black54,
+                            fontSize: 14)),
                   const SizedBox(height: 8),
                   Text("Stock: $stock",
-                      style:
-                      const TextStyle(color: Colors.black87, fontSize: 14)),
+                      style: TextStyle(
+                          color:
+                          isDark ? Colors.white70 : Colors.black87,
+                          fontSize: 14)),
                   Text("Unit Price: ${price.toStringAsFixed(3)} OMR",
-                      style: const TextStyle(
+                      style:  TextStyle(
                           fontWeight: FontWeight.bold,
-                          color: Colors.blueAccent,
+                          color: Colors.blue,
                           fontSize: 15)),
                   const SizedBox(height: 12),
+
+                  // show prescription upload area only if needed
                   if (needsPrescription)
                     Container(
                       margin: const EdgeInsets.only(top: 8),
                       padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.blue.shade50,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+
                       child: _prescriptionUrl == null
+                      // show upload button if no prescription
                           ? ElevatedButton.icon(
                         onPressed: () => uploadPrescription(),
                         icon: const Icon(Icons.upload_file),
-                        label: const Text("UPLOAD PRESCRIPTION"),
+                        label:
+                        const Text("UPLOAD PRESCRIPTION"),
                         style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blueAccent,
+                            backgroundColor: Colors.blue[400],
                             foregroundColor: Colors.white),
                       )
+                      // show options if prescription uploaded
                           : Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        mainAxisAlignment:
+                        MainAxisAlignment.spaceEvenly,
                         children: [
                           ElevatedButton(
                             onPressed: viewPrescription,
                             style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.blueAccent),
+                                backgroundColor:
+                                Colors.blueAccent),
                             child: Text(
                               _prescriptionUrl!.endsWith(".pdf")
                                   ? "VIEW PDF"
                                   : "VIEW IMAGE",
-                              style:
-                              const TextStyle(color: Colors.white),
+                              style: const TextStyle(
+                                  color: Colors.white),
                             ),
                           ),
                           ElevatedButton(
@@ -411,27 +477,33 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
                             style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.grey),
                             child: const Text("REMOVE",
-                                style: TextStyle(color: Colors.white)),
+                                style: TextStyle(
+                                    color: Colors.white)),
                           ),
                           ElevatedButton(
                             onPressed: () =>
                                 uploadPrescription(replace: true),
                             style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.blueAccent),
+                                backgroundColor:
+                                Colors.blueAccent),
                             child: const Text("REPLACE",
-                                style: TextStyle(color: Colors.white)),
+                                style: TextStyle(
+                                    color: Colors.white)),
                           ),
                         ],
                       ),
                     ),
                   const SizedBox(height: 16),
+
+                  // quantity section + total price
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Row(children: [
+                        // decrease quantity
                         IconButton(
                           icon: const Icon(Icons.remove_circle,
-                              color: Colors.blueAccent),
+                              color: Colors.redAccent),
                           onPressed: _quantity > 1
                               ? () {
                             setState(() => _quantity--);
@@ -441,7 +513,9 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
                         ),
                         Text("$_quantity",
                             style: const TextStyle(
-                                fontWeight: FontWeight.bold, fontSize: 16)),
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16)),
+                        // increase quantity
                         IconButton(
                           icon: const Icon(Icons.add_circle,
                               color: Colors.blueAccent),
@@ -454,29 +528,36 @@ class _MedicineDetailScreenState extends State<MedicineDetailScreen> {
                         ),
                       ]),
                       Text("${(price * _quantity).toStringAsFixed(3)} OMR",
-                          style: const TextStyle(
+                          style: TextStyle(
                               fontWeight: FontWeight.bold,
-                              color: Colors.black87)),
+                              color: isDark
+                                  ? Colors.white60
+                                  : Colors.black54)),
                     ],
                   ),
                   const SizedBox(height: 16),
+
+                  // add to cart button
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: isAddToCartEnabled ? addToCart : null,
+                      onPressed:
+                      isAddToCartEnabled ? addToCart : null,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: isAddToCartEnabled
-                            ? Colors.blueAccent
+                            ? Colors.blue[400]
                             : Colors.grey,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12)),
                       ),
-                      child: const Text(
-                        "ADD TO CART",
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, color: Colors.white),
+                      child: Text(
+                        stock > 0 ? "ADD TO CART" : "OUT OF STOCK",
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white),
                       ),
+
                     ),
                   ),
                 ],

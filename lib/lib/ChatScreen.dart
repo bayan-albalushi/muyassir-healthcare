@@ -3,8 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class ChatScreen extends StatefulWidget {
-  final String orderId; // ✅ المحادثة مربوطة بطلب واحد
-  final String userRole; // "user" أو "pharmacy"
+  final String orderId; // good: clear what this is used for
+  final String userRole; // nice: you separate logic for user/pharmacy
 
   const ChatScreen({
     super.key,
@@ -20,15 +20,15 @@ class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final user = FirebaseAuth.instance.currentUser;
 
-  String chatWithName = ""; // 👤 الطرف الثاني
+  String chatWithName = ""; // clean: holds display name of other person
 
   @override
   void initState() {
     super.initState();
-    _loadChatPartner();
+    _loadChatPartner(); // good practice: async call isolated
   }
 
-  // ✅ جلب اسم الطرف الآخر
+  // 👇 Loads the name of the other chat participant based on role
   Future<void> _loadChatPartner() async {
     final orderDoc = await FirebaseFirestore.instance
         .collection('placedOrders')
@@ -39,7 +39,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final orderData = orderDoc.data() as Map<String, dynamic>;
 
       if (widget.userRole == "user") {
-        // اليوزر يتكلم مع الصيدلية
+        // user chatting with pharmacy
         final pharmacyId = orderData['pharmacyId'];
         if (pharmacyId != null) {
           final pharmacyDoc = await FirebaseFirestore.instance
@@ -53,7 +53,7 @@ class _ChatScreenState extends State<ChatScreen> {
           }
         }
       } else {
-        // الصيدلاني يتكلم مع اليوزر
+        // pharmacy chatting with user
         final userId = orderData['userId'];
         if (userId != null) {
           final userDoc = await FirebaseFirestore.instance
@@ -74,7 +74,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  // ✅ إرسال رسالة
+  // 👇 Sends a message to Firestore (simple and effective)
   Future<void> _sendMessage() async {
     if (_messageController.text.trim().isEmpty) return;
 
@@ -83,7 +83,7 @@ class _ChatScreenState extends State<ChatScreen> {
     await FirebaseFirestore.instance.collection('chats').add({
       'orderId': widget.orderId,
       'senderId': user?.uid ?? 'unknown',
-      'senderRole': widget.userRole, // 🔹 user أو pharmacy
+      'senderRole': widget.userRole,
       'message': message,
       'timestamp': FieldValue.serverTimestamp(),
     });
@@ -95,16 +95,17 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        // neat dynamic title
         title: Text(chatWithName.isEmpty
             ? (widget.userRole == "user"
             ? "Chat with Pharmacy"
             : "Chat with User")
             : "Chat with $chatWithName"),
-        backgroundColor: Colors.blueAccent,
+        backgroundColor: Colors.blue[400],
       ),
       body: Column(
         children: [
-          // ✅ الرسائل
+          // messages section
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
@@ -119,6 +120,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
                 final docs = snapshot.data!.docs;
 
+                // neat use of reverse: true for bottom alignment
                 return ListView.builder(
                   reverse: true,
                   itemCount: docs.length,
@@ -126,9 +128,11 @@ class _ChatScreenState extends State<ChatScreen> {
                     final data = docs[index].data() as Map<String, dynamic>;
                     final isMe = data['senderId'] == user?.uid;
 
+                    // bubble UI
                     return Align(
-                      alignment:
-                      isMe ? Alignment.centerRight : Alignment.centerLeft,
+                      alignment: isMe
+                          ? Alignment.centerRight
+                          : Alignment.centerLeft,
                       child: Container(
                         margin: const EdgeInsets.symmetric(
                             vertical: 4, horizontal: 8),
@@ -156,9 +160,10 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
 
-          // ✅ إدخال رسالة
+          // input bar
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            padding:
+            const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             color: Colors.grey[200],
             child: Row(
               children: [
@@ -172,7 +177,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.send, color: Colors.blueAccent),
+                  icon: Icon(Icons.send, color: Colors.blue[400]),
                   onPressed: _sendMessage,
                 ),
               ],

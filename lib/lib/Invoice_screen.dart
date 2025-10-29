@@ -3,12 +3,14 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'user_home_screen.dart';
 import 'ChatScreen.dart';
 
+// 🧾 This screen displays the order invoice right after checkout
+// It shows delivery info, payment summary, and live order updates from Firestore
 class InvoiceScreen extends StatelessWidget {
-  final List<String> orderIds;
-  final double total;
-  final String address;
-  final String phone;
-  final String paymentMethod;
+  final List<String> orderIds; // list of placed order IDs (can be multiple)
+  final double total; // total amount including delivery
+  final String address; // delivery address
+  final String phone; // user's phone number
+  final String paymentMethod; // "cash" or "card"
 
   const InvoiceScreen({
     super.key,
@@ -19,14 +21,14 @@ class InvoiceScreen extends StatelessWidget {
     required this.paymentMethod,
   });
 
-  // 🎨 ألوان لحالة الطلب
+  // Helper: choose color based on order status (Approved, Pending, Delivered, etc.)
   Color _statusColor(String status) {
     switch (status.toLowerCase()) {
       case 'approved':
         return Colors.green.shade400;
       case 'pending':
         return Colors.orangeAccent;
-      case 'pendingapproval': // ✅ مضافة من شغل زميلتك
+      case 'pendingapproval': // handled from older data version
         return Colors.orange;
       case 'processing':
         return Colors.blueGrey;
@@ -41,22 +43,23 @@ class InvoiceScreen extends StatelessWidget {
     }
   }
 
-  // 🎨 ألوان لحالة الدفع
+  // Helper: choose color based on payment status (Authorized, Captured, etc.)
   Color _paymentColor(String paymentStatus) {
     switch (paymentStatus.toLowerCase()) {
       case 'authorized':
-        return Colors.orangeAccent;
+        return Colors.orangeAccent; // waiting for pharmacy confirmation
       case 'captured':
-        return Colors.green;
+        return Colors.green; // payment completed
       case 'refunded':
-        return Colors.red;
+        return Colors.red; // payment returned
       case 'pending_cash':
-        return Colors.blueGrey;
+        return Colors.blueGrey; // cash on delivery
       default:
         return Colors.grey;
     }
   }
 
+  // Helper: format Firebase timestamp into readable date
   String _formatTimestamp(dynamic timestamp) {
     if (timestamp is Timestamp) {
       final date = timestamp.toDate();
@@ -74,7 +77,9 @@ class InvoiceScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Invoice"),
-        backgroundColor: isDark ? Colors.grey.shade900 : Colors.blueAccent,
+        automaticallyImplyLeading: false, // 🔹 This hides the default back arrow
+
+        backgroundColor: isDark ? Colors.grey.shade900 : Colors.blue[400],
         centerTitle: true,
       ),
       backgroundColor: isDark ? Colors.black : const Color(0xFFF0F4F8),
@@ -82,6 +87,7 @@ class InvoiceScreen extends StatelessWidget {
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
+            // Main heading
             Text(
               "Thank you for your order!",
               style: TextStyle(
@@ -92,7 +98,7 @@ class InvoiceScreen extends StatelessWidget {
             ),
             const SizedBox(height: 20),
 
-            // ✅ ملخص الطلب
+            // 🧩 General summary section (address, phone, total, etc.)
             Card(
               color: cardColor,
               margin: const EdgeInsets.only(bottom: 20),
@@ -115,7 +121,7 @@ class InvoiceScreen extends StatelessWidget {
                         style: TextStyle(
                             fontWeight: FontWeight.bold, color: textColor)),
                     subtitle: Text(paymentMethod.toUpperCase(),
-                        style: const TextStyle(color: Colors.blueAccent)),
+                        style: TextStyle(color: Colors.blue[400])),
                   ),
                   ListTile(
                     title: Text("Grand Total",
@@ -129,12 +135,14 @@ class InvoiceScreen extends StatelessWidget {
               ),
             ),
 
-            // ✅ تفاصيل كل Order
+            // 🧩 Orders list (each order ID may belong to one provider type)
             Expanded(
               child: ListView.builder(
                 itemCount: orderIds.length,
                 itemBuilder: (context, index) {
                   final orderId = orderIds[index];
+
+                  // Use StreamBuilder for live updates from Firestore
                   return StreamBuilder<DocumentSnapshot>(
                     stream: FirebaseFirestore.instance
                         .collection('placedOrders')
@@ -145,6 +153,7 @@ class InvoiceScreen extends StatelessWidget {
                         return const Center(
                             child: CircularProgressIndicator());
                       }
+
                       final orderData =
                           snapshot.data!.data() as Map<String, dynamic>? ?? {};
                       final status = (orderData['status'] ?? "N/A").toString();
@@ -154,21 +163,20 @@ class InvoiceScreen extends StatelessWidget {
                       (orderData['total'] ?? 0).toDouble();
                       final paymentStatus =
                       (orderData['paymentStatus'] ?? "N/A").toString();
-
                       final deliveryDate = orderData['deliveryDate'];
                       final deliverySlot = orderData['deliverySlot'];
 
-                      // ✅ لو مرفوض وكان Authorized → Refund
+                      // Smart check: if rejected but payment was authorized → refund it
                       final effectivePaymentStatus =
                       (status.toLowerCase() == "rejected" &&
                           paymentStatus.toLowerCase() == "authorized")
                           ? "refunded"
                           : (status.toLowerCase() == "approved" &&
-                          paymentStatus.toLowerCase() ==
-                              "authorized")
+                          paymentStatus.toLowerCase() == "authorized")
                           ? "captured"
                           : paymentStatus;
 
+                      // 🎨 Order card view
                       return Card(
                         color: cardColor,
                         margin: const EdgeInsets.only(bottom: 20),
@@ -177,6 +185,7 @@ class InvoiceScreen extends StatelessWidget {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
+                              // Order ID
                               ListTile(
                                 title: Text("Order ID",
                                     style: TextStyle(
@@ -185,6 +194,8 @@ class InvoiceScreen extends StatelessWidget {
                                 subtitle: Text(orderId,
                                     style: TextStyle(color: textColor)),
                               ),
+
+                              // Order Status with color + reason if rejected
                               ListTile(
                                 title: Text("Order Status",
                                     style: TextStyle(
@@ -209,6 +220,8 @@ class InvoiceScreen extends StatelessWidget {
                                   ],
                                 ),
                               ),
+
+                              // Payment status with matching color
                               ListTile(
                                 title: Text("Payment Status",
                                     style: TextStyle(
@@ -218,11 +231,13 @@ class InvoiceScreen extends StatelessWidget {
                                   effectivePaymentStatus.toUpperCase(),
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
-                                    color: _paymentColor(effectivePaymentStatus),
+                                    color:
+                                    _paymentColor(effectivePaymentStatus),
                                   ),
                                 ),
                               ),
 
+                              // Delivery info (date + slot)
                               if (deliveryDate != null)
                                 ListTile(
                                   title: Text("Delivery Date",
@@ -245,6 +260,8 @@ class InvoiceScreen extends StatelessWidget {
                                     style: TextStyle(color: textColor),
                                   ),
                                 ),
+
+                              // Total for this order
                               ListTile(
                                 title: Text("Order Total",
                                     style: TextStyle(
@@ -256,7 +273,7 @@ class InvoiceScreen extends StatelessWidget {
                               ),
                               const Divider(),
 
-                              // ✅ Items لكل Order حسب نوع الـ Provider
+                              // 🧩 Nested list of items for this specific order
                               StreamBuilder<QuerySnapshot>(
                                 stream: FirebaseFirestore.instance
                                     .collection('placedOrders')
@@ -272,6 +289,8 @@ class InvoiceScreen extends StatelessWidget {
                                   if (items.isEmpty) {
                                     return const Text("No items found.");
                                   }
+
+                                  // show each item with type-based icon
                                   return Column(
                                     children: items.map((doc) {
                                       final data =
@@ -282,6 +301,7 @@ class InvoiceScreen extends StatelessWidget {
                                       final price =
                                       (data['price'] ?? 0).toDouble();
 
+                                      // ✅ Only pharmacy
                                       if (providerType == "pharmacy") {
                                         return ListTile(
                                           leading: const Icon(Icons.medication,
@@ -293,40 +313,7 @@ class InvoiceScreen extends StatelessWidget {
                                                   fontWeight: FontWeight.bold,
                                                   color: textColor)),
                                           subtitle: Text("Quantity: $qty",
-                                              style:
-                                              TextStyle(color: textColor)),
-                                          trailing: Text(
-                                              "${(price * qty).toStringAsFixed(3)} OMR",
                                               style: TextStyle(
-                                                  fontWeight: FontWeight.bold,
-                                                  color: textColor)),
-                                        );
-                                      } else if (providerType == "hospital") {
-                                        return ListTile(
-                                          leading: const Icon(
-                                              Icons.local_hospital,
-                                              color: Colors.redAccent),
-                                          title: Text(
-                                              data['name'] ??
-                                                  "Unknown Hospital Service",
-                                              style: TextStyle(
-                                                  fontWeight: FontWeight.bold,
-                                                  color: textColor)),
-                                          trailing: Text(
-                                              "${(price * qty).toStringAsFixed(3)} OMR",
-                                              style: TextStyle(
-                                                  fontWeight: FontWeight.bold,
-                                                  color: textColor)),
-                                        );
-                                      } else if (providerType == "lab") {
-                                        return ListTile(
-                                          leading: const Icon(Icons.biotech,
-                                              color: Colors.deepPurple),
-                                          title: Text(
-                                              data['testName'] ??
-                                                  "Unknown Lab Test",
-                                              style: TextStyle(
-                                                  fontWeight: FontWeight.bold,
                                                   color: textColor)),
                                           trailing: Text(
                                               "${(price * qty).toStringAsFixed(3)} OMR",
@@ -335,6 +322,7 @@ class InvoiceScreen extends StatelessWidget {
                                                   color: textColor)),
                                         );
                                       }
+
                                       return const SizedBox.shrink();
                                     }).toList(),
                                   );
@@ -350,12 +338,13 @@ class InvoiceScreen extends StatelessWidget {
               ),
             ),
 
-            // ✅ زر الرجوع للـ Home + Chat
+            // ✅ Bottom buttons for Finish (Home) and Chat Support
             Row(
               children: [
                 Expanded(
                   child: ElevatedButton(
                     onPressed: () {
+                      // Go back to home and clear previous routes
                       Navigator.pushAndRemoveUntil(
                         context,
                         MaterialPageRoute(
@@ -380,6 +369,7 @@ class InvoiceScreen extends StatelessWidget {
                 Expanded(
                   child: ElevatedButton(
                     onPressed: () {
+                      // Open chat screen for this order
                       Navigator.push(
                         context,
                         MaterialPageRoute(
@@ -391,7 +381,7 @@ class InvoiceScreen extends StatelessWidget {
                       );
                     },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blueAccent,
+                      backgroundColor: Colors.blue[400],
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12)),

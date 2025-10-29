@@ -8,8 +8,8 @@ import 'package:http/http.dart' as http;
 import 'invoice_screen.dart';
 import 'package:flutter/services.dart';
 
-
-// ✅ Formatter يضيف "/" بعد أول رقمين
+// This formatter automatically adds a "/" after the first two digits
+// when typing an expiry date like "MM/YY"
 class ExpiryDateFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -25,9 +25,10 @@ class ExpiryDateFormatter extends TextInputFormatter {
   }
 }
 
+// Checkout screen where user confirms payment, delivery and address
 class CheckoutScreen extends StatefulWidget {
-  final double total;
-  final String pharmacyId;
+  final double total; // total amount from cart
+  final String pharmacyId; // pharmacy ID to link the order
 
   const CheckoutScreen({
     super.key,
@@ -40,6 +41,7 @@ class CheckoutScreen extends StatefulWidget {
 }
 
 class _CheckoutScreenState extends State<CheckoutScreen> {
+  // form and input controllers
   final _formKey = GlobalKey<FormState>();
   final _phoneController = TextEditingController();
   final _cardNameController = TextEditingController();
@@ -47,23 +49,24 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   final _expiryController = TextEditingController();
   final _cvcController = TextEditingController();
 
-  String _paymentMethod = "cash";
+  // basic states
+  String _paymentMethod = "cash"; // default payment option
   final double deliveryFee = 1.500;
-  LatLng _selectedLocation = LatLng(23.5880, 58.3829); // Muscat
+  LatLng _selectedLocation = LatLng(23.5880, 58.3829); // default: Muscat
   String? _address;
   DateTime? _selectedDate;
   String? _deliverySlot;
-  bool _isArabicMap = false;
+  bool _isArabicMap = false; // toggle between Arabic/English address
 
-
+  // Get readable address from latitude and longitude using OpenStreetMap API
   Future<void> _getAddressFromLatLng(LatLng position) async {
-    // 🔹 اللغة فقط تتغير، الخريطة تظل إنجليزية
     final lang = _isArabicMap ? "ar" : "en";
     final url = Uri.parse(
         "https://nominatim.openstreetmap.org/reverse?format=json&lat=${position.latitude}&lon=${position.longitude}&accept-language=$lang");
 
     try {
-      final response = await http.get(url, headers: {"User-Agent": "muyassir_app"});
+      final response =
+      await http.get(url, headers: {"User-Agent": "muyassir_app"});
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         setState(() => _address = data["display_name"]);
@@ -77,7 +80,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     }
   }
 
-
+  // Open calendar to pick delivery date
   Future<void> _pickDate(BuildContext context) async {
     final picked = await showDatePicker(
       context: context,
@@ -88,6 +91,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     if (picked != null) setState(() => _selectedDate = picked);
   }
 
+  // Decrease medicine stock after checkout
   Future<void> _decreaseStock(String medicineId, int quantityBought) async {
     final docRef =
     FirebaseFirestore.instance.collection('medicines').doc(medicineId);
@@ -103,9 +107,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     });
   }
 
+  // Main order function - validates data, saves order to Firestore, updates stock
   Future<void> _placeOrder() async {
+    // validate all fields before proceeding
     if (!_formKey.currentState!.validate()) return;
 
+    // make sure delivery date and slot are selected
     if (_selectedDate == null || _deliverySlot == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -120,6 +127,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     if (user == null) return;
 
     try {
+      // get current user's cart items
       final ordersSnapshot = await FirebaseFirestore.instance
           .collection('orders')
           .where('userId', isEqualTo: user.uid)
@@ -132,6 +140,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         return;
       }
 
+      // create new order document in "placedOrders"
       final placedOrderRef = FirebaseFirestore.instance
           .collection('placedOrders')
           .doc("${user.uid}_${DateTime.now().millisecondsSinceEpoch}");
@@ -140,40 +149,43 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       bool hasPrescription = false;
       List<String> prescriptionUrls = [];
 
+      // loop through each cart item
       for (var doc in ordersSnapshot.docs) {
         final data = doc.data() as Map<String, dynamic>;
         totalAmount += (data['price'] ?? 0) * (data['quantity'] ?? 1);
+
+        // check if prescription exists
         if (data['prescriptions'] != null &&
             (data['prescriptions'] as List).isNotEmpty) {
           hasPrescription = true;
           prescriptionUrls.addAll(List<String>.from(data['prescriptions']));
         }
+
+        // update stock in medicines collection
         if (data['medicineId'] != null) {
           await _decreaseStock(data['medicineId'], data['quantity'] ?? 1);
         }
+
+        // add the item inside the placed order sub-collection
         await placedOrderRef.collection("items").add(data);
+
+        // remove from current cart after moving
         await doc.reference.delete();
       }
 
-      String orderStatus = "approved";
+      // decide order + payment status based on conditions
+      String orderStatus = "pending";
       String paymentStatus = "pending_cash";
 
       if (hasPrescription) {
         orderStatus = "pending";
-        if (_paymentMethod == "card") {
-          paymentStatus = "authorized";
-        } else {
-          paymentStatus = "pending_cash";
-        }
+        paymentStatus = _paymentMethod == "card" ? "authorized" : "pending_cash";
       } else {
-        orderStatus = "approved";
-        if (_paymentMethod == "card") {
-          paymentStatus = "captured";
-        } else {
-          paymentStatus = "pending_cash";
-        }
+        orderStatus = "pending"; // no prescription, instant approval
+        paymentStatus = _paymentMethod == "card" ? "captured" : "pending_cash";
       }
 
+      // save main order details
       await placedOrderRef.set({
         "userId": user.uid,
         "userEmail": user.email,
@@ -195,10 +207,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         "prescriptions": prescriptionUrls,
       });
 
+      // show feedback message based on payment
       String msg = "";
       if (_paymentMethod == "card" && hasPrescription) {
         msg =
-        "The amount has been authorized on your card 💳, pending the pharmacy's approval of the prescription.";
+        "The amount has been authorized on your card 💳, pending pharmacy approval.";
       } else if (_paymentMethod == "card" && !hasPrescription) {
         msg = "The amount has been successfully charged to your card 💳.";
       } else {
@@ -208,6 +221,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(msg)));
 
+      // move user to invoice page after success
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
@@ -227,12 +241,17 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     }
   }
 
+  // UI part starts here
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white70 : Colors.black87;
+    final fieldColor = isDark ? Colors.grey.shade800 : Colors.white;
+    final containerColor = isDark ? Colors.grey.shade900 : Colors.blue.shade50;
     final totalWithDelivery = widget.total + deliveryFee;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF9F9F9),
+      backgroundColor: isDark ? Colors.black : const Color(0xFFF9F9F9),
       appBar: AppBar(
         centerTitle: true,
         title: const Text(
@@ -240,7 +259,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           style: TextStyle(
               fontWeight: FontWeight.bold, color: Colors.white, fontSize: 20),
         ),
-        backgroundColor: Colors.blueAccent,
+        backgroundColor: Colors.blue[400],
       ),
       body: Form(
         key: _formKey,
@@ -249,17 +268,20 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Order summary (items + delivery + total)
               _buildSummaryRow("Items Total:",
-                  "${widget.total.toStringAsFixed(3)} OMR"),
-              _buildSummaryRow(
-                  "Delivery Fee:", "${deliveryFee.toStringAsFixed(3)} OMR"),
+                  "${widget.total.toStringAsFixed(3)} OMR", textColor),
+              _buildSummaryRow("Delivery Fee:",
+                  "${deliveryFee.toStringAsFixed(3)} OMR", textColor),
               const Divider(),
-              _buildSummaryRow("Total Payable:",
+              _buildSummaryRow(
+                  "Total Payable:",
                   "${totalWithDelivery.toStringAsFixed(3)} OMR",
+                  textColor,
                   isBold: true),
               const SizedBox(height: 20),
 
-              // ✅ Map
+              // Interactive map for choosing delivery location
               SizedBox(
                 height: 200,
                 child: FlutterMap(
@@ -273,13 +295,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                   ),
                   children: [
                     TileLayer(
-                      urlTemplate: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+                      urlTemplate:
+                      "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
                       subdomains: ['a', 'b', 'c'],
                       userAgentPackageName: 'com.muyassir.healthcare',
                     ),
-
-
-
                     MarkerLayer(markers: [
                       Marker(
                         point: _selectedLocation,
@@ -292,63 +312,73 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                   ],
                 ),
               ),
+
+              // Language toggle for address
               Align(
                 alignment: Alignment.centerRight,
                 child: ElevatedButton.icon(
                   onPressed: () {
                     setState(() {
                       _isArabicMap = !_isArabicMap;
-                      _getAddressFromLatLng(_selectedLocation); // ✅ يعيد جلب العنوان باللغة الجديدة
+                      _getAddressFromLatLng(_selectedLocation);
                     });
                   },
                   icon: const Icon(Icons.language, color: Colors.white),
                   label: Text(
-                    _isArabicMap ? "Switch Address to English" : "تبديل العنوان إلى العربي",
+                    _isArabicMap
+                        ? "Switch Address to English"
+                        : "تبديل العنوان إلى العربي",
                     style: const TextStyle(color: Colors.white),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blueAccent,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    backgroundColor: Colors.blue[400],
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
               ),
 
               const SizedBox(height: 10),
 
+              // Display selected address text box
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
+                  color: containerColor,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
                   _address ??
                       "Lat: ${_selectedLocation.latitude}, Lng: ${_selectedLocation.longitude}",
-                  style: const TextStyle(
-                      color: Colors.black87, fontWeight: FontWeight.w500),
+                  style: TextStyle(
+                      color: textColor, fontWeight: FontWeight.w500),
                 ),
               ),
 
               const SizedBox(height: 20),
 
+              // Delivery date & slot section
               ListTile(
                 title: Text(
                   _selectedDate == null
                       ? "Select delivery date"
                       : "Date: ${_selectedDate!.day}-${_selectedDate!.month}-${_selectedDate!.year}",
-                  style: const TextStyle(color: Colors.black87),
+                  style: TextStyle(color: textColor),
                 ),
                 trailing:
                 const Icon(Icons.calendar_today, color: Colors.blueAccent),
                 onTap: () => _pickDate(context),
               ),
-              _buildDeliverySlot("8:00 AM - 2:00 PM"),
-              _buildDeliverySlot("2:00 PM - 6:00 PM"),
-              _buildDeliverySlot("6:00 PM - 10:00 PM"),
+              Text("Select Time :" ,style: TextStyle(fontWeight: FontWeight.w900)),
+              _buildDeliverySlot("8:00 AM - 2:00 PM", textColor),
+              _buildDeliverySlot("2:00 PM - 6:00 PM", textColor),
+              _buildDeliverySlot("6:00 PM - 10:00 PM", textColor),
 
               const SizedBox(height: 20),
 
+              // Phone number field
               _buildTextField(_phoneController, "Enter your phone number",
                   TextInputType.phone, (value) {
                     if (value == null || value.isEmpty) {
@@ -358,10 +388,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       return "Phone must start with 2, 7, or 9 and be 8 digits";
                     }
                     return null;
-                  }),
+                  }, fieldColor),
 
               const SizedBox(height: 12),
 
+              // Payment dropdown (cash/card)
               DropdownButtonFormField<String>(
                 value: _paymentMethod,
                 items: const [
@@ -373,12 +404,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 onChanged: (value) => setState(() => _paymentMethod = value!),
                 decoration: InputDecoration(
                   filled: true,
-                  fillColor: Colors.white,
-                  border:
-                  OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  fillColor: fieldColor,
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12)),
                 ),
               ),
 
+              // Card fields only appear if card payment is selected
               if (_paymentMethod == "card") ...[
                 const SizedBox(height: 12),
                 _buildTextField(_cardNameController, "Card Name",
@@ -388,7 +420,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                         return "Card name must contain only letters";
                       }
                       return null;
-                    }),
+                    }, fieldColor),
                 _buildTextField(_cardNumberController, "Card Number",
                     TextInputType.number, (v) {
                       if (v == null || v.isEmpty) return "Card number required";
@@ -396,7 +428,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                         return "Card must be 16 digits";
                       }
                       return null;
-                    }),
+                    }, fieldColor),
                 Row(children: [
                   Expanded(
                     child: TextFormField(
@@ -410,7 +442,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       decoration: InputDecoration(
                         hintText: "MM/YY",
                         filled: true,
-                        fillColor: Colors.white,
+                        fillColor: fieldColor,
                         border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12)),
                       ),
@@ -421,15 +453,27 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                             .hasMatch(v)) {
                           return "Invalid format MM/YY";
                         }
-                        final parts = v.split('/');
-                        int month = int.parse(parts[0]);
-                        int year = 2000 + int.parse(parts[1]);
-                        final now = DateTime.now();
-                        final lastDateOfMonth =
-                        DateTime(year, month + 1, 0);
-                        if (year > now.year + 10) return "Year not valid";
-                        if (lastDateOfMonth.isBefore(now))
-                          return "Card expired";
+
+                        try {
+                          final parts = v.split('/');
+                          final month = int.parse(parts[0]);
+                          final year = int.parse(parts[1]) + 2000;
+                          final now = DateTime.now();
+
+                          if (month < 1 || month > 12)
+                            return "Invalid month";
+                          if (year > now.year + 10)
+                            return "Year not valid";
+
+                          final lastDayOfMonth =
+                          DateTime(year, month + 1, 0);
+                          if (lastDayOfMonth.isBefore(now)) {
+                            return "Card expired";
+                          }
+                        } catch (_) {
+                          return "Invalid expiry date";
+                        }
+
                         return null;
                       },
                     ),
@@ -437,24 +481,33 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: _buildTextField(
-                        _cvcController, "CVC", TextInputType.number, (v) {
-                      if (v == null || v.isEmpty) return "CVC required";
-                      if (!RegExp(r'^[0-9]{3}$').hasMatch(v)) {
-                        return "CVC must be exactly 3 digits";
-                      }
-                      return null;
-                    }),
+                      _cvcController,
+                      "CVC",
+                      TextInputType.number,
+                          (v) {
+                        if (v == null || v.isEmpty) return "CVC required";
+                        if (!RegExp(r'^[0-9]{3}$').hasMatch(v)) {
+                          return "CVC must be exactly 3 digits";
+                        }
+                        if (v == "000") {
+                          return "CVC cannot be all zeros";
+                        }
+                        return null;
+                      },
+                      fieldColor,
+                    ),
                   ),
                 ]),
               ],
 
               const SizedBox(height: 25),
+              // Final checkout button
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: _placeOrder,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blueAccent,
+                    backgroundColor: Colors.blue[400],
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12)),
@@ -475,22 +528,25 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     );
   }
 
-  Widget _buildSummaryRow(String label, String value, {bool isBold = false}) {
+  // Small UI helper widgets
+  Widget _buildSummaryRow(String label, String value, Color textColor,
+      {bool isBold = false}) {
     return Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label,
               style: TextStyle(
-                  color: Colors.black87,
+                  color: textColor,
                   fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
           Text(value,
               style: TextStyle(
-                  color: Colors.black87,
+                  color: textColor,
                   fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
         ]);
   }
 
-  Widget _buildDeliverySlot(String slot) {
+  // Delivery slot selector with validation for past times
+  Widget _buildDeliverySlot(String slot, Color textColor) {
     bool isPast = false;
     if (_selectedDate != null) {
       final now = DateTime.now();
@@ -511,15 +567,16 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     return RadioListTile<String>(
       title: Text(slot,
           style: TextStyle(
-              color: isPast ? Colors.grey : Colors.black87,
+              color: isPast ? Colors.grey : textColor,
               fontWeight: FontWeight.w500)),
       value: slot,
       groupValue: _deliverySlot,
       onChanged: isPast ? null : (v) => setState(() => _deliverySlot = v),
-      activeColor: Colors.blueAccent,
+      activeColor: Colors.blueGrey,
     );
   }
 
+  // Convert time string like "8:00 PM" to DateTime
   DateTime _parseTime(String time, DateTime day) {
     final match = RegExp(r'(\d+):(\d+) (AM|PM)').firstMatch(time);
     if (match == null) return day;
@@ -531,15 +588,16 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     return DateTime(day.year, day.month, day.day, hour, minute);
   }
 
+  // Generic text field builder for reusable form inputs
   Widget _buildTextField(TextEditingController c, String hint,
-      TextInputType type, String? Function(String?) validator) {
+      TextInputType type, String? Function(String?) validator, Color fieldColor) {
     return TextFormField(
       controller: c,
       keyboardType: type,
       decoration: InputDecoration(
         hintText: hint,
         filled: true,
-        fillColor: Colors.white,
+        fillColor: fieldColor,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
       ),
       validator: validator,

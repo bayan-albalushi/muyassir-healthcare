@@ -58,11 +58,11 @@ class MuyassirApp extends StatelessWidget {
           // 🌞 Light Theme
           theme: ThemeData(
             brightness: Brightness.light,
-            primarySwatch: Colors.teal,
+            primarySwatch: Colors.lightBlue,
             scaffoldBackgroundColor: Colors.grey.shade100,
             cardColor: Colors.white,
             appBarTheme: const AppBarTheme(
-              backgroundColor: Colors.teal,
+              backgroundColor: Colors.lightBlueAccent,
               foregroundColor: Colors.white,
               elevation: 0,
             ),
@@ -73,7 +73,7 @@ class MuyassirApp extends StatelessWidget {
                     if (states.contains(MaterialState.disabled)) {
                       return Colors.grey.shade400; // لون الزر لما Disabled
                     }
-                    return Colors.teal; // اللون الأساسي
+                    return Colors.blue; // اللون الأساسي
                   },
                 ),
                 foregroundColor: MaterialStateProperty.resolveWith<Color>(
@@ -96,7 +96,7 @@ class MuyassirApp extends StatelessWidget {
             ),
             textButtonTheme: TextButtonThemeData(
               style: TextButton.styleFrom(
-                foregroundColor: Colors.teal,
+                foregroundColor: Colors.lightBlueAccent,
                 textStyle: const TextStyle(fontWeight: FontWeight.w500),
               ),
             ),
@@ -116,11 +116,30 @@ class MuyassirApp extends StatelessWidget {
           // 🌙 Dark Theme
           darkTheme: ThemeData(
             brightness: Brightness.dark,
-            primarySwatch: Colors.teal,
+            primarySwatch: Colors.blue,
             scaffoldBackgroundColor: Colors.black,
             cardColor: Colors.grey.shade900,
+
+            dialogBackgroundColor: Colors.grey.shade900, // ✅ الخلفية تتماشى مع الوضع الداكن
+            dialogTheme: DialogTheme(
+              titleTextStyle: const TextStyle(
+                color: Colors.white, // عنوان الـ dialog
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+              ),
+              contentTextStyle: const TextStyle(
+                color: Colors.white70, // النصوص داخل الـ dialog
+                fontSize: 16,
+              ),
+              backgroundColor: Colors.grey.shade900, // تأكيد لون الخلفية
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+
+
             appBarTheme: const AppBarTheme(
-              backgroundColor: Colors.teal,
+              backgroundColor: Colors.blue,
               foregroundColor: Colors.white,
               elevation: 0,
             ),
@@ -131,7 +150,7 @@ class MuyassirApp extends StatelessWidget {
                     if (states.contains(MaterialState.disabled)) {
                       return Colors.grey.shade700; // زر Disabled في الدارك
                     }
-                    return Colors.teal;
+                    return Colors.blue;
                   },
                 ),
                 foregroundColor: MaterialStateProperty.resolveWith<Color>(
@@ -154,7 +173,7 @@ class MuyassirApp extends StatelessWidget {
             ),
             textButtonTheme: TextButtonThemeData(
               style: TextButton.styleFrom(
-                foregroundColor: Colors.tealAccent,
+                foregroundColor: Colors.blue,
                 textStyle: const TextStyle(fontWeight: FontWeight.w500),
               ),
             ),

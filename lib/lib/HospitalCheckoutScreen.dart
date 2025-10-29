@@ -42,6 +42,10 @@ class _HospitalCheckoutScreenState extends State<HospitalCheckoutScreen> {
   DateTime? _selectedDate;
   bool _isPlacing = false;
   String? _selectedTimeSlot;
+  bool _isArabicMap = false;
+
+
+
 
   final List<String> _timeSlots = [
     '08:00 AM - 10:00 AM',
@@ -105,12 +109,24 @@ class _HospitalCheckoutScreenState extends State<HospitalCheckoutScreen> {
     return _timeSlots;
   }
 
-  Future<void> _getAddressFromLatLng(LatLng pos) async {
+  Future<void> _getAddressFromLatLng(LatLng position) async {
+    // 🔹 اللغة فقط تتغير، الخريطة تظل إنجليزية
+    final lang = _isArabicMap ? "ar" : "en";
     final url = Uri.parse(
-        "https://nominatim.openstreetmap.org/reverse?format=json&lat=${pos.latitude}&lon=${pos.longitude}&zoom=18&addressdetails=1&accept-language=en");
-    final res = await http.get(url, headers: {"User-Agent": "hospital_app"});
-    if (res.statusCode == 200) {
-      setState(() => _address = jsonDecode(res.body)["display_name"]);
+        "https://nominatim.openstreetmap.org/reverse?format=json&lat=${position.latitude}&lon=${position.longitude}&accept-language=$lang");
+
+    try {
+      final response = await http.get(url, headers: {"User-Agent": "muyassir_app"});
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        setState(() => _address = data["display_name"]);
+      } else {
+        throw Exception("Failed to load address");
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("⚠️ Error fetching address: $e")),
+      );
     }
   }
 
@@ -256,7 +272,7 @@ class _HospitalCheckoutScreenState extends State<HospitalCheckoutScreen> {
       backgroundColor: const Color(0xFFF0F4F8),
       appBar: AppBar(
         title: const Text("Hospital Checkout"),
-        backgroundColor: Colors.blueAccent,
+        backgroundColor: Colors.blue[400],
         centerTitle: true,
       ),
       body: Form(
@@ -286,22 +302,72 @@ class _HospitalCheckoutScreenState extends State<HospitalCheckoutScreen> {
                   ),
                   children: [
                     TileLayer(
-                      urlTemplate: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-                      subdomains: ['a', 'b', 'c'],
+                      urlTemplate: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+                      userAgentPackageName: 'com.muyassir.healthcare',
                     ),
+
+
+
+
                     MarkerLayer(markers: [
                       Marker(
                         point: _selectedLocation,
                         width: 40,
                         height: 40,
-                        child: const Icon(Icons.location_pin, color: Colors.red, size: 40),
+                        child: const Icon(Icons.location_pin,
+                            color: Colors.red, size: 40),
                       ),
                     ]),
                   ],
                 ),
               ),
-              const SizedBox(height: 10),
-              Text(_address ?? "Lat: ${_selectedLocation.latitude}, Lng: ${_selectedLocation.longitude}"),
+
+
+
+              Align(
+                alignment: Alignment.centerRight,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _isArabicMap = !_isArabicMap;
+                      _getAddressFromLatLng(_selectedLocation); // ✅ يعيد جلب العنوان باللغة الجديدة
+                    });
+                  },
+                  icon: const Icon(Icons.language, color: Colors.white),
+                  label: Text(
+                    _isArabicMap ? "Switch Address to English" : "تبديل العنوان إلى العربي",
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blueAccent,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ),
+
+              if (_address != null) ...[
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black12,
+                        blurRadius: 4,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Text(
+                    _address!,
+                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ],
 
               const SizedBox(height: 20),
               ListTile(
@@ -356,12 +422,29 @@ class _HospitalCheckoutScreenState extends State<HospitalCheckoutScreen> {
               ),
 
               if (_paymentMethod == "card") ...[
-                _buildTextField(_cardNameController, "Card Name", TextInputType.text,
-                        (v) => v == null || v.isEmpty ? "Card name required" : null),
+                _buildTextField(
+
+                  _cardNameController,
+
+                  "Card Name",
+
+                  TextInputType.text,
+                      (v) {
+                    if (v == null || v.isEmpty) return "Card name required";
+                    if (!RegExp(r'^[A-Za-z\s]+$').hasMatch(v)) {
+                      return "Name should contain letters only";
+                    }
+                    if (v.trim().length < 3) return "Enter full card name";
+                    return null;
+                  },
+                ),
                 _buildTextField(_cardNumberController, "Card Number", TextInputType.number, validateCardNumber),
                 _buildTextField(_expiryController, "MM/YY", TextInputType.text, validateExpiry),
                 _buildTextField(_cvcController, "CVC", TextInputType.number, validateCVC),
               ],
+
+
+
 
               const SizedBox(height: 20),
               SizedBox(
@@ -369,7 +452,7 @@ class _HospitalCheckoutScreenState extends State<HospitalCheckoutScreen> {
                 child: ElevatedButton(
                   onPressed: _isPlacing ? null : _placeOrder,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
+                    backgroundColor: Colors.lightBlue,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),

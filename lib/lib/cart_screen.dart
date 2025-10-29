@@ -1,3 +1,7 @@
+// This page shows all items that the user added to their cart (from pharmacy, hospital, or lab).
+// The user can increase/decrease quantity, upload prescriptions, or delete items.
+// It also calculates the total and redirects to the correct checkout screen based on provider type.
+
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -8,40 +12,53 @@ import 'checkout_screen.dart';
 import 'HospitalCheckoutScreen.dart';
 import 'medicine_detail_screen.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
+import 'LabCheckoutScreen.dart';
 
 class CartScreen extends StatelessWidget {
-  const CartScreen({super.key});
+  final String? labId; // labId is optional, used if user came from lab side
+  const CartScreen({super.key, this.labId});
 
-  // ✅ Update quantity with stock check and delete if 0
+  // 🔹 Function to update item quantity in Firestore.
+  // If quantity becomes 0 or less → it deletes the item completely.
   Future<void> updateQuantityWithCheck(
       BuildContext context, Map<String, dynamic> item, int newQuantity) async {
     if (newQuantity <= 0) {
+      // delete the order if quantity is zero
       await FirebaseFirestore.instance
           .collection('orders')
           .doc(item['cartId'])
           .delete();
+
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text("Item deleted ✅")));
       return;
     }
 
+    // otherwise, just update quantity and timestamp
     await FirebaseFirestore.instance
         .collection('orders')
         .doc(item['cartId'])
         .update({
       'quantity': newQuantity,
-      'timestamp': FieldValue.serverTimestamp(), // ✅ تحديث الوقت
+      'timestamp': FieldValue.serverTimestamp(),
     });
+
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("✅ Quantity updated successfully")));
   }
 
-  // ✅ Delete item
+  // 🔹 Function to delete an item manually from the cart
   Future<void> deleteOrder(BuildContext context, String cartId) async {
     await FirebaseFirestore.instance.collection('orders').doc(cartId).delete();
+    if (!context.mounted) return;
     ScaffoldMessenger.of(context)
         .showSnackBar(const SnackBar(content: Text("Item deleted ✅")));
   }
 
-  // ✅ Upload prescription to Cloudinary
+  // 🔹 Upload prescription file to Cloudinary (image or PDF)
+  // Then save the uploaded file URL into Firestore under "prescriptions"
   Future<void> uploadPrescription(BuildContext context, String cartId,
       {bool replace = false}) async {
     try {
@@ -52,18 +69,23 @@ class CartScreen extends StatelessWidget {
       );
 
       if (result == null || result.files.isEmpty) {
+        // user cancelled picking a file
+        if (!context.mounted) return;
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text("❌ No file selected")));
         return;
       }
 
       final file = result.files.single;
+
+      // check if file is image or pdf for proper Cloudinary upload type
       final isImage = file.extension
           ?.toLowerCase()
           .contains(RegExp(r'(jpg|jpeg|png|gif|webp)')) ??
           false;
       final resourceType = isImage ? 'image' : 'raw';
 
+      // upload to Cloudinary
       final url = Uri.parse(
           "https://api.cloudinary.com/v1_1/dkiqssdwj/$resourceType/upload");
       final request = http.MultipartRequest('POST', url);
@@ -72,6 +94,8 @@ class CartScreen extends StatelessWidget {
           filename: file.name));
 
       final response = await request.send();
+
+      // when upload is successful, update Firestore
       if (response.statusCode == 200) {
         final responseData = jsonDecode(await response.stream.bytesToString());
         final secureUrl = responseData['secure_url'];
@@ -81,26 +105,32 @@ class CartScreen extends StatelessWidget {
             .doc(cartId)
             .update({
           'prescriptions': [secureUrl],
-          'timestamp': FieldValue.serverTimestamp(), // ✅ تحديث الوقت
+          'timestamp': FieldValue.serverTimestamp(),
         });
 
+        if (!context.mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text(replace
                 ? "✅ Prescription replaced successfully"
                 : "✅ Prescription uploaded successfully")));
       } else {
+        // upload failed
+        if (!context.mounted) return;
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text("⚠️ Upload failed")));
       }
     } catch (e) {
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text("⚠️ Error: $e")));
     }
   }
 
-  // ✅ Open prescription (image or PDF)
+  // 🔹 View prescription file (open in new page or popup)
   Future<void> openPrescription(BuildContext context, String url) async {
     if (url.toLowerCase().endsWith(".pdf")) {
+      // open PDF in a new screen
+      if (!context.mounted) return;
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -111,6 +141,8 @@ class CartScreen extends StatelessWidget {
         ),
       );
     } else {
+      // open image in popup dialog
+      if (!context.mounted) return;
       showDialog(
         context: context,
         builder: (_) => Dialog(
@@ -122,7 +154,7 @@ class CartScreen extends StatelessWidget {
     }
   }
 
-  // ✅ UI
+  // 🔹 Main UI build for the cart page
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -145,13 +177,14 @@ class CartScreen extends StatelessWidget {
             color: Colors.white,
           ),
         ),
-        backgroundColor: isDark ? Colors.grey[900] : Colors.blueAccent,
+        backgroundColor: isDark ? Colors.grey[900] : Colors.blue[400],
         leading: IconButton(
-          icon:
-          Icon(Icons.arrow_back, color: isDark ? Colors.white : Colors.white),
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
       ),
+
+      // 🔹 Real-time listener for all cart items of this user
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
             .collection('orders')
@@ -165,49 +198,57 @@ class CartScreen extends StatelessWidget {
 
           final docs = snapshot.data!.docs;
           if (docs.isEmpty) {
+            // empty cart message
             return Center(
               child: Text("Your cart is empty.",
                   style: TextStyle(color: textColor, fontSize: 16)),
             );
           }
 
+          // convert documents into a list of maps
           final cartItems = docs.map((doc) {
             final data = doc.data() as Map<String, dynamic>;
             return {'cartId': doc.id, ...data};
           }).toList();
 
           double total = 0;
-          bool hasWaitingApproval = false;
           bool missingPrescription = false;
 
+          // 🔹 Calculate total and check for missing prescriptions
           for (var item in cartItems) {
+            final price = item['price'] ?? 0;
+
+            if (item['providerType'] == "pharmacy") {
+              total += price * (item['quantity'] ?? 1);
+            } else {
+              total += price; // for hospital & lab, no quantity field
+            }
+
+            // check if medicine requires a prescription
             if (item['providerType'] == "pharmacy") {
               final String type = item['prescriptionType']?.toString() ?? 'none';
               final int limit = item['prescriptionLimit'] is int
                   ? item['prescriptionLimit']
-                  : int.tryParse(item['prescriptionLimit']?.toString() ?? '0') ?? 0;
+                  : int.tryParse(item['prescriptionLimit']?.toString() ?? '0') ??
+                  0;
 
-              // ✅ يحتاج وصفة إذا النوع required أو تجاوز الحد في byQuantity
-              final bool needsPrescription =
-                  type == "required" ||
-                      (type == "byQuantity" && (item['quantity'] ?? 1) > limit);
+              final bool needsPrescription = type == "required" ||
+                  (type == "byQuantity" && (item['quantity'] ?? 1) > limit);
 
+              final presList = (item['prescriptions'] is List)
+                  ? List<String>.from(item['prescriptions'])
+                  : [];
 
-              final presList = List<String>.from(item['prescriptions'] ?? []);
-
-              // ✅ يخلي الزر رمادي لو تجاوز الحد بدون وصفة
               if (needsPrescription && presList.isEmpty) {
                 missingPrescription = true;
               }
-
-              // ✅ المجموع الكلي
-              total += (item['price'] ?? 0) * (item['quantity'] ?? 1);
             }
           }
 
-
+          // 🔹 Main cart layout
           return Column(
             children: [
+              // show list of all cart items
               Expanded(
                 child: ListView.builder(
                   padding: const EdgeInsets.all(12),
@@ -217,11 +258,19 @@ class CartScreen extends StatelessWidget {
                     if (item['providerType'] == "pharmacy") {
                       return _buildPharmacyCard(
                           item, cardColor, textColor, isDark, context);
+                    } else if (item['providerType'] == "hospital") {
+                      return _buildHospitalCard(item, cardColor, context);
+                    } else if (item['providerType'] == "lab") {
+                      return _buildLabRow(item, isDark, context);
+                    } else {
+                      // in case of unexpected provider type
+                      return const SizedBox.shrink();
                     }
-                    return _buildHospitalCard(item, cardColor, context);
                   },
                 ),
               ),
+
+              // 🔹 Bottom total and checkout button
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -235,6 +284,7 @@ class CartScreen extends StatelessWidget {
                 ),
                 child: Column(
                   children: [
+                    // total price row
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -251,43 +301,72 @@ class CartScreen extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 15),
+
+                    // checkout button
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: (hasWaitingApproval || missingPrescription)
-                            ? null // 🔒 الزر يتعطل لما يحتاج وصفة وما رفعها
+                        onPressed: missingPrescription
+                            ? null // disable button if any prescription missing
                             : () {
-                          final hasPharmacy = cartItems.any((e) => e['providerType'] == "pharmacy");
-                          final hasHospital = cartItems.any((e) => e['providerType'] == "hospital");
+                          // prevent mixed checkout between providers
+                          final hasPharmacy = cartItems.any(
+                                  (e) => e['providerType'] == "pharmacy");
+                          final hasHospital = cartItems.any(
+                                  (e) => e['providerType'] == "hospital");
+                          final hasLab = cartItems.any(
+                                  (e) => e['providerType'] == "lab");
 
-                          if (hasPharmacy && hasHospital) {
+                          if ((hasPharmacy && hasHospital) ||
+                              (hasPharmacy && hasLab) ||
+                              (hasHospital && hasLab)) {
+                            if (!context.mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text("⚠️ You cannot checkout both Pharmacy and Hospital items together.")),
+                              const SnackBar(
+                                  content: Text(
+                                      "⚠️ You cannot checkout multiple provider types together.")),
                             );
                             return;
                           }
 
+                          // navigate to the correct checkout page
                           final firstItem = cartItems.first;
+
                           if (firstItem['providerType'] == "pharmacy") {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
                                 builder: (_) => CheckoutScreen(
                                   total: total,
-                                  pharmacyId: firstItem['pharmacyId'] ?? "",
+                                  pharmacyId:
+                                  firstItem['pharmacyId'] ?? "",
                                 ),
                               ),
                             );
-                          } else {
+                          } else if (firstItem['providerType'] ==
+                              "hospital") {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
                                 builder: (_) => HospitalCheckoutScreen(
-                                  hospitalId: firstItem['hospitalId'] ?? "",
+                                  hospitalId:
+                                  firstItem['hospitalId'] ?? "",
                                   services: cartItems
-                                      .where((e) => e['providerType'] == "hospital")
+                                      .where((e) =>
+                                  e['providerType'] ==
+                                      "hospital")
                                       .toList(),
                                   notes: firstItem['notes'] ?? "",
+                                  total: total,
+                                ),
+                              ),
+                            );
+                          } else if (firstItem['providerType'] == "lab") {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => LabCheckoutScreen(
+                                  labId: firstItem['labId'] ?? "",
                                   total: total,
                                 ),
                               ),
@@ -295,17 +374,18 @@ class CartScreen extends StatelessWidget {
                           }
                         },
                         style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          backgroundColor:
-                          (hasWaitingApproval || missingPrescription)
-                              ? Colors.grey // 🔒 رمادي لما يحتاج وصفة
-                              : (isDark ? Colors.teal : Colors.blueAccent),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          padding:
+                          const EdgeInsets.symmetric(vertical: 16),
+                          backgroundColor: missingPrescription
+                              ? Colors.grey
+                              : (isDark
+                              ? Colors.blueAccent
+                              : Colors.blue[400]),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
                         ),
                         child: Text(
-                          hasWaitingApproval
-                              ? "WAITING APPROVAL ⏳"
-                              : missingPrescription
+                          missingPrescription
                               ? "UPLOAD PRESCRIPTION ⚠️"
                               : "CHECKOUT",
                           style: const TextStyle(
@@ -317,7 +397,6 @@ class CartScreen extends StatelessWidget {
                         ),
                       ),
                     ),
-
                   ],
                 ),
               ),
@@ -328,13 +407,15 @@ class CartScreen extends StatelessWidget {
     );
   }
 
-  // ✅ PHARMACY CARD
+  // 🔹 Build UI for Pharmacy items in the cart
   Widget _buildPharmacyCard(
       item, cardColor, textColor, isDark, BuildContext context) {
-    final presList = List<String>.from(item['prescriptions'] ?? []);
-    final waiting = item['requiresApproval'] == true &&
-        (item['status'] == "waiting_approval" || item['status'] == "pending");
+    // convert prescriptions field into a list safely
+    final presList = (item['prescriptions'] is List)
+        ? List<String>.from(item['prescriptions'])
+        : [];
 
+    // checks related to prescription type
     final String type = item['prescriptionType']?.toString() ?? 'none';
     final int limit = item['prescriptionLimit'] is int
         ? item['prescriptionLimit']
@@ -352,6 +433,7 @@ class CartScreen extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // medicine image
               item['images'] != null && item['images'].isNotEmpty
                   ? ClipRRect(
                 borderRadius: BorderRadius.circular(8),
@@ -362,9 +444,11 @@ class CartScreen extends StatelessWidget {
                   fit: BoxFit.cover,
                 ),
               )
-                  : const Icon(Icons.medication,
-                  size: 40, color: Colors.blueAccent),
+                  : Icon(Icons.medication,
+                  size: 40, color: Colors.blue[400]),
               const SizedBox(width: 12),
+
+              // medicine name, price, and prescription status
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -378,23 +462,27 @@ class CartScreen extends StatelessWidget {
                     Text("${(item['price'] ?? 0).toStringAsFixed(3)} OMR",
                         style: TextStyle(
                             color: textColor, fontWeight: FontWeight.bold)),
+
+                    // show prescription status below
                     if (needsPrescription)
                       Text(
                         presList.isEmpty
                             ? "⚠️ Prescription required"
                             : "✅ Prescription uploaded",
                         style: TextStyle(
-                            color: presList.isEmpty ? Colors.red : Colors.green,
+                            color: presList.isEmpty
+                                ? Colors.red
+                                : Colors.green,
                             fontSize: 12),
                       ),
                     const SizedBox(height: 8),
+
+                    // quantity control buttons (add / remove)
                     Row(
                       children: [
                         _qtyButton(Icons.remove, Colors.red, () {
-                          if (!waiting) {
-                            int newQty = (item['quantity'] ?? 1) - 1;
-                            updateQuantityWithCheck(context, item, newQty);
-                          }
+                          int newQty = (item['quantity'] ?? 1) - 1;
+                          updateQuantityWithCheck(context, item, newQty);
                         }),
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -404,32 +492,60 @@ class CartScreen extends StatelessWidget {
                         ),
                         _qtyButton(
                           Icons.add,
-                          prescriptionMissing ? Colors.grey : Colors.green,
-                              () {
-                            if (!waiting &&
-                                !prescriptionMissing &&
+                          (needsPrescription && prescriptionMissing)
+                              ? Colors.grey
+                              : Colors.green,
+                              () async {
+                            if (item['cartId'] != null &&
                                 item['quantity'] <
                                     (item['stock'] ?? 9999)) {
-                              int newQty = (item['quantity'] ?? 1) + 1;
-                              updateQuantityWithCheck(context, item, newQty);
-                            } else if (prescriptionMissing) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                    content: Text(
-                                        "⚠️ You must upload a prescription to add more.")),
-                              );
+                              // if prescription is missing → open medicine detail to upload it
+                              if (needsPrescription &&
+                                  prescriptionMissing) {
+                                final doc = await FirebaseFirestore.instance
+                                    .collection('medicines')
+                                    .doc(item['medicineId'])
+                                    .get();
+
+                                if (!doc.exists) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                          content:
+                                          Text("⚠️ Medicine not found")));
+                                  return;
+                                }
+
+                                final medicineData = doc.data()!;
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => MedicineDetailScreen(
+                                      medicineData: medicineData,
+                                      pharmacyId: item['pharmacyId'],
+                                      medicineId: item['medicineId'],
+                                    ),
+                                  ),
+                                );
+                              } else {
+                                // normal increase
+                                int newQty = (item['quantity'] ?? 1) + 1;
+                                await updateQuantityWithCheck(
+                                    context, item, newQty);
+                              }
                             }
                           },
                         ),
+                        // delete icon
                         IconButton(
-                          icon:
-                          const Icon(Icons.delete, color: Colors.red),
+                          icon: const Icon(Icons.delete, color: Colors.red),
                           onPressed: () =>
                               deleteOrder(context, item['cartId']),
                         ),
                       ],
                     ),
                     const SizedBox(height: 6),
+
+                    // upload / view / replace prescription buttons
                     if (needsPrescription)
                       presList.isEmpty
                           ? ElevatedButton.icon(
@@ -441,10 +557,9 @@ class CartScreen extends StatelessWidget {
 
                           if (!doc.exists) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content:
-                                  Text("⚠️ Medicine not found")),
-                            );
+                                const SnackBar(
+                                    content:
+                                    Text("⚠️ Medicine not found")));
                             return;
                           }
 
@@ -459,28 +574,28 @@ class CartScreen extends StatelessWidget {
                               ),
                             ),
                           );
+
                           if (result == true) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text(
-                                      "✅ Prescription uploaded")),
-                            );
+                                const SnackBar(
+                                    content: Text(
+                                        "✅ Prescription uploaded")));
                           }
                         },
                         icon: const Icon(Icons.upload_file),
-                        label:
-                        const Text("Upload Prescription"),
+                        label: const Text("Upload Prescription"),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blueAccent,
+                          backgroundColor: Colors.blue[400],
                           foregroundColor: Colors.white,
                           minimumSize: const Size(160, 36),
                         ),
                       )
                           : Row(
                         children: [
+                          // open existing prescription
                           ElevatedButton.icon(
-                            onPressed: () => openPrescription(
-                                context, presList.first),
+                            onPressed: () =>
+                                openPrescription(context, presList.first),
                             icon: presList.first
                                 .toLowerCase()
                                 .endsWith(".pdf")
@@ -498,6 +613,7 @@ class CartScreen extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(width: 6),
+                          // replace prescription
                           ElevatedButton.icon(
                             onPressed: () => uploadPrescription(
                               context,
@@ -530,40 +646,40 @@ class CartScreen extends StatelessWidget {
     );
   }
 
-  // ✅ Hospital Card
+  // 🔹 Hospital cart card (simple display of service info + delete)
   Widget _buildHospitalCard(item, cardColor, BuildContext context) {
     return Card(
-        margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        color: cardColor,
-        elevation: 3,
-        child: ListTile(
-            leading: const Icon(Icons.medical_services,
-                size: 40, color: Colors.blueAccent),
-            title: Text(item['name'] ?? "Hospital Service",
-                style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (item['parentService'] != null)
-                  Text("Category: ${item['parentService']}"),
-                if (item['notes'] != null && item['notes'].toString().isNotEmpty)
-                  Text("Notes: ${item['notes']}"),
-                Text(
-                  "Price: ${(item['price'] ?? 0).toStringAsFixed(3)} OMR",
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ],
+      margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      color: cardColor,
+      elevation: 3,
+      child: ListTile(
+        leading: const Icon(Icons.medical_services,
+            size: 40, color: Colors.blueAccent),
+        title: Text(item['name'] ?? "Hospital Service",
+            style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (item['parentService'] != null)
+              Text("Category: ${item['parentService']}"),
+            if (item['notes'] != null && item['notes'].toString().isNotEmpty)
+              Text("Notes: ${item['notes']}"),
+            Text(
+              "Price: ${(item['price'] ?? 0).toStringAsFixed(3)} OMR",
+              style: const TextStyle(fontWeight: FontWeight.bold),
             ),
-            trailing: IconButton(
-              icon: const Icon(Icons.delete, color: Colors.red),
-              onPressed: () => deleteOrder(context, item['cartId']),
-            ),
+          ],
         ),
+        trailing: IconButton(
+          icon: const Icon(Icons.delete, color: Colors.red),
+          onPressed: () => deleteOrder(context, item['cartId']),
+        ),
+      ),
     );
   }
 
-  // ✅ زر زيادة ونقصان الكمية
+  // 🔹 Small reusable widget for quantity buttons (+ / -)
   Widget _qtyButton(IconData icon, Color color, VoidCallback onPressed) {
     return InkWell(
       onTap: onPressed,
@@ -572,12 +688,71 @@ class CartScreen extends StatelessWidget {
           color: Colors.white,
           shape: BoxShape.circle,
           boxShadow: [
-            BoxShadow(color: Colors.black12, blurRadius: 3, offset: Offset(0, 2))
+            BoxShadow(
+                color: Colors.black12, blurRadius: 3, offset: Offset(0, 2))
           ],
         ),
         padding: const EdgeInsets.all(4),
         child: Icon(icon, color: color, size: 20),
       ),
+    );
+  }
+
+  // 🔹 Lab cart item row (simple view for lab tests)
+  Widget _buildLabRow(item, isDark, BuildContext context) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const Icon(Icons.science, size: 40, color: Colors.teal),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item['testName'] ?? "Lab Test",
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    "${(item['price'] ?? 0).toStringAsFixed(3)} OMR",
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  IconButton(
+                    icon: const Icon(Icons.delete, color: Colors.red),
+                    onPressed: () async {
+                      await FirebaseFirestore.instance
+                          .collection('orders')
+                          .doc(item['cartId'])
+                          .delete();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("Item deleted ✅")),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const Divider(height: 1, thickness: 0.5),
+      ],
     );
   }
 }

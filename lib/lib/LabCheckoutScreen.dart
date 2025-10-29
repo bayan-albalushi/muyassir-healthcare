@@ -26,6 +26,7 @@ class LabCheckoutScreen extends StatefulWidget {
   final double total;
   final String labId;
 
+
   const LabCheckoutScreen({super.key, required this.total, required this.labId});
 
   @override
@@ -99,11 +100,9 @@ class _LabCheckoutScreenState extends State<LabCheckoutScreen> {
     if (user == null) return;
 
     try {
-      // ✅ سحب بس طلبات الـ Lab
       final ordersSnapshot = await FirebaseFirestore.instance
           .collection('orders')
           .where('userId', isEqualTo: user.uid)
-          .where('providerType', isEqualTo: "lab")
           .get();
 
       if (ordersSnapshot.docs.isEmpty) {
@@ -141,16 +140,18 @@ class _LabCheckoutScreenState extends State<LabCheckoutScreen> {
       }
 
       // Payment & status
-      String orderStatus = hasPrescription ? "pending" : "approved";
+// Payment & status
+      String orderStatus = "pending"; // ✅ الحالة المبدئية
+
       String paymentStatus = _paymentMethod == "card"
           ? (hasPrescription ? "authorized" : "captured")
           : "pending_cash";
 
       await placedOrderRef.set({
+        'providerType': 'lab',
         "userId": user.uid,
         "userEmail": user.email,
         "labId": widget.labId,
-        "providerType": "lab",
         "total": totalAmount,
         "location": {
           "lat": _selectedLocation.latitude,
@@ -166,7 +167,6 @@ class _LabCheckoutScreenState extends State<LabCheckoutScreen> {
         "timestamp": FieldValue.serverTimestamp(),
         "prescriptions": prescriptionUrls,
       });
-
 
       String msg = "";
       if (_paymentMethod == "card" && hasPrescription) {
@@ -208,16 +208,16 @@ class _LabCheckoutScreenState extends State<LabCheckoutScreen> {
     return Scaffold(
       backgroundColor: backgroundColor,
       appBar: AppBar(
-        title: Text("Lab Checkout",
-            style: TextStyle(color: isDark ? Colors.white : Colors.black)),
-        backgroundColor: isDark ? Colors.grey.shade900 : Colors.blueAccent,
+        title:
+        Text("Lab Checkout", style: TextStyle(color: isDark ? Colors.white : Colors.black)),
+        backgroundColor: isDark ? Colors.grey.shade900 : Colors.teal,
         centerTitle: true,
         iconTheme: IconThemeData(color: isDark ? Colors.white : Colors.black),
       ),
       body: Form(
         key: _formKey,
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
+          padding : const EdgeInsets.all(20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -231,7 +231,7 @@ class _LabCheckoutScreenState extends State<LabCheckoutScreen> {
                   isBold: true),
               const SizedBox(height: 20),
 
-              // Map
+              // Map (optional)
               SizedBox(
                 height: 200,
                 child: FlutterMap(
@@ -264,7 +264,7 @@ class _LabCheckoutScreenState extends State<LabCheckoutScreen> {
               ),
               const SizedBox(height: 10),
 
-              // Address
+              // Show Address
               Card(
                 color: isDark ? Colors.grey[800] : Colors.blue[50],
                 shape: RoundedRectangleBorder(
@@ -282,7 +282,7 @@ class _LabCheckoutScreenState extends State<LabCheckoutScreen> {
               ),
               const SizedBox(height: 20),
 
-              // Date & Slot
+              // Date & slot
               ListTile(
                 title: Text(
                   _selectedDate == null
@@ -302,8 +302,7 @@ class _LabCheckoutScreenState extends State<LabCheckoutScreen> {
               // Phone
               _buildTextField(_phoneController, "Enter your phone number",
                   textColor, cardColor, TextInputType.phone, (value) {
-                    if (value == null || value.isEmpty)
-                      return "Phone number is required";
+                    if (value == null || value.isEmpty) return "Phone number is required";
                     if (!RegExp(r'^[279][0-9]{7}$').hasMatch(value)) {
                       return "Phone must start with 2, 7, or 9 and be 8 digits";
                     }
@@ -316,8 +315,7 @@ class _LabCheckoutScreenState extends State<LabCheckoutScreen> {
                 dropdownColor: cardColor,
                 value: _paymentMethod,
                 items: const [
-                  DropdownMenuItem(
-                      value: "cash", child: Text("Cash on Delivery")),
+                  DropdownMenuItem(value: "cash", child: Text("Cash on Delivery")),
                   DropdownMenuItem(
                       value: "card", child: Text("Credit/Debit Card")),
                 ],
@@ -367,8 +365,7 @@ class _LabCheckoutScreenState extends State<LabCheckoutScreen> {
                             borderRadius: BorderRadius.circular(12)),
                       ),
                       validator: (v) {
-                        if (v == null || v.isEmpty)
-                          return "Expiry date required";
+                        if (v == null || v.isEmpty) return "Expiry date required";
                         if (!RegExp(r'^(0[1-9]|1[0-2])\/\d{2}$').hasMatch(v)) {
                           return "Invalid format MM/YY";
                         }
@@ -378,8 +375,7 @@ class _LabCheckoutScreenState extends State<LabCheckoutScreen> {
                         final now = DateTime.now();
                         final lastDateOfMonth = DateTime(year, month + 1, 0);
                         if (year > now.year + 10) return "Year not valid";
-                        if (lastDateOfMonth.isBefore(now))
-                          return "Card expired";
+                        if (lastDateOfMonth.isBefore(now)) return "Card expired";
                         return null;
                       },
                     ),
@@ -427,12 +423,10 @@ class _LabCheckoutScreenState extends State<LabCheckoutScreen> {
     return Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
       Text(label,
           style: TextStyle(
-              color: color,
-              fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
+              color: color, fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
       Text(value,
           style: TextStyle(
-              color: color,
-              fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
+              color: color, fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
     ]);
   }
 

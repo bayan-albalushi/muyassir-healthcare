@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
-import 'MyReportsScreen.dart'; // Import your existing screen
+import 'MyReportsScreen.dart';
+import 'p_reports_screen.dart';
+import 'UserReportScreen.dart';
+
+
 
 class MyReportsCategoryScreen extends StatelessWidget {
   const MyReportsCategoryScreen({super.key});
@@ -15,6 +19,8 @@ class MyReportsCategoryScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('My Reports'),
+        centerTitle: true,
+        backgroundColor: const Color(0xFF1565C0),
       ),
       body: Padding(
         padding: const EdgeInsets.all(20),
@@ -34,14 +40,21 @@ class MyReportsCategoryScreen extends StatelessWidget {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => const MyReportsScreen(),
+                      builder: (_) => const MyReportsScreen(), // صفحة المستشفى
                     ),
                   );
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text("${item['name']} section coming soon!"),
-                      duration: const Duration(seconds: 2),
+                } else if (item['name'] == 'Pharmacy') {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const PReportsScreen(), // صفحة الصيدلية (غيري الاسم لو مختلف)
+                    ),
+                  );
+                } else if (item['name'] == 'Labs') {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const UserReportScreen(), // صفحة المختبر (غيريها عند صديقتك)
                     ),
                   );
                 }
@@ -55,8 +68,11 @@ class MyReportsCategoryScreen extends StatelessWidget {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(item['icon'] as IconData,
-                        color: item['color'] as Color, size: 50),
+                    Icon(
+                      item['icon'] as IconData,
+                      color: item['color'] as Color,
+                      size: 50,
+                    ),
                     const SizedBox(height: 10),
                     Text(
                       item['name'] as String,
