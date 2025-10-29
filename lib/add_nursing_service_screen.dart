@@ -1,8 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
-import 'add_nursing_service_screen.dart';
-
 class AddNursingServiceScreen extends StatefulWidget {
   final String? serviceId;
   final Map<String, dynamic>? existingData;
@@ -40,8 +38,7 @@ class _AddNursingServiceScreenState extends State<AddNursingServiceScreen> {
     if (widget.existingData != null) {
       serviceNameController.text = widget.existingData!['name'] ?? '';
       descriptionController.text = widget.existingData!['description'] ?? '';
-      final rawSub =
-          widget.existingData!['subServices'] as List<dynamic>? ?? [];
+      final rawSub = widget.existingData!['subServices'] as List<dynamic>? ?? [];
       subServices = rawSub.map((s) {
         final map = s as Map<String, dynamic>;
         return {
@@ -53,34 +50,72 @@ class _AddNursingServiceScreenState extends State<AddNursingServiceScreen> {
     }
   }
 
+  @override
+  void dispose() {
+    serviceNameController.dispose();
+    descriptionController.dispose();
+    subServiceNameController.dispose();
+    subServicePriceController.dispose();
+    super.dispose();
+  }
+
+  // --- Helper: normalize string for duplicate checks
+  String _normalize(String s) {
+    return s.replaceAll(RegExp(r"\s+"), "").toLowerCase();
+  }
+
   String _makeId(String name) {
     return '${name.trim().toLowerCase().replaceAll(RegExp(r"\s+"), "_")}_${DateTime.now().millisecondsSinceEpoch}';
   }
 
-  // --- Add sub-service with local duplicate check
-  void _addSubService() {
+  // --- Add sub-service locally
+  Future<void> _addSubService() async {
     final name = subServiceNameController.text.trim();
     final price = double.tryParse(subServicePriceController.text.trim());
 
-    if (name.isEmpty || price == null) {
+    if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Valid name & price required")),
+        const SnackBar(content: Text("Sub-service name is required")),
       );
       return;
     }
 
-    final isDuplicateLocal = subServices.any((s) =>
-    (s['name'] ?? '').toString().trim().toLowerCase() == name.toLowerCase());
+    if (price == null || price <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Price must be greater than 0")),
+      );
+      return;
+    }
 
+    // Check local duplicates first
+    final isDuplicateLocal = subServices.any((s) => _normalize(s['name'] ?? '') == _normalize(name));
     if (isDuplicateLocal) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content:
-            Text("Sub-service with this name already exists in this service")),
+        const SnackBar(content: Text("Sub-service already exists in this service")),
       );
       return;
     }
 
+    // Check global duplicates in other services
+    final query = await servicesRef
+        .where('hospitalId', isEqualTo: widget.hospitalId)
+        .get();
+
+    for (var doc in query.docs) {
+      if (widget.serviceId != null && doc.id == widget.serviceId) continue;
+      final data = doc.data() as Map<String, dynamic>;
+      final existingSubServices = List.from(data['subServices'] ?? []);
+      for (var sub in existingSubServices) {
+        if (_normalize(sub['name'] ?? '') == _normalize(name)) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Sub-service already exists in another service")),
+          );
+          return;
+        }
+      }
+    }
+
+    // If all checks pass, add the sub-service
     setState(() {
       subServices.add({'id': _makeId(name), 'name': name, 'price': price});
       subServiceNameController.clear();
@@ -88,10 +123,12 @@ class _AddNursingServiceScreenState extends State<AddNursingServiceScreen> {
     });
   }
 
+
   void _editSubService(int index) {
     final s = subServices[index];
     final nameCtrl = TextEditingController(text: s['name']);
     final priceCtrl = TextEditingController(text: s['price'].toString());
+
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -105,38 +142,40 @@ class _AddNursingServiceScreenState extends State<AddNursingServiceScreen> {
             TextField(
               controller: priceCtrl,
               decoration: const InputDecoration(labelText: "Price"),
-              keyboardType: TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Cancel")),
           ElevatedButton(
-              onPressed: () {
-                final newName = nameCtrl.text.trim();
-                final newPrice = double.tryParse(priceCtrl.text.trim());
-                if (newName.isEmpty || newPrice == null) return;
+            onPressed: () {
+              final newName = nameCtrl.text.trim();
+              final newPrice = double.tryParse(priceCtrl.text.trim());
+              if (newName.isEmpty || newPrice == null) return;
 
-                final isDuplicateLocal = subServices.asMap().entries.any((e) =>
-                e.key != index &&
-                    (e.value['name'] ?? '').toString().trim().toLowerCase() ==
-                        newName.toLowerCase());
+              final isDuplicateLocal = subServices.asMap().entries.any((e) =>
+              e.key != index &&
+                  _normalize(e.value['name'] ?? '') == _normalize(newName));
 
-                if (isDuplicateLocal) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text(
-                            "Sub-service with this name already exists in this service")),
-                  );
-                  return;
-                }
+              if (isDuplicateLocal) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                      content: Text(
+                          "Sub-service with this name already exists in this service")),
+                );
+                return;
+              }
 
-                setState(() {
-                  subServices[index] = {'id': s['id'], 'name': newName, 'price': newPrice};
-                });
-                Navigator.pop(context);
-              },
-              child: const Text("Save"))
+              setState(() {
+                subServices[index] = {'id': s['id'], 'name': newName, 'price': newPrice};
+              });
+              Navigator.pop(context);
+            },
+            child: const Text("Save"),
+          ),
         ],
       ),
     );
@@ -148,7 +187,7 @@ class _AddNursingServiceScreenState extends State<AddNursingServiceScreen> {
     });
   }
 
-  // --- Check duplicate sub-services across all services
+  // --- Check duplicate sub-services globally
   Future<bool> _hasDuplicateSubServiceGlobal() async {
     final query = await servicesRef
         .where('hospitalId', isEqualTo: widget.hospitalId)
@@ -161,34 +200,33 @@ class _AddNursingServiceScreenState extends State<AddNursingServiceScreen> {
 
       for (var sub in existingSubServices) {
         for (var newSub in subServices) {
-          if ((sub['name'] ?? '').toString().trim().toLowerCase() ==
-              (newSub['name'] ?? '').toString().trim().toLowerCase()) {
+          if (_normalize(sub['name'] ?? '') == _normalize(newSub['name'] ?? '')) {
             return true;
           }
         }
       }
     }
-
     return false;
   }
 
   Future<void> _submitService() async {
     if (!_formKey.currentState!.validate()) return;
+
     if (subServices.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Add at least one sub-service")));
       return;
     }
 
-    // Check main service name duplicate
-    final newName = serviceNameController.text.trim().toLowerCase();
+    // --- Check main service name duplicates (ignore spaces & case)
+    final newName = _normalize(serviceNameController.text.trim());
     final query = await servicesRef
         .where('hospitalId', isEqualTo: widget.hospitalId)
         .get();
 
     final isDuplicateServiceName = query.docs.any((doc) {
       final data = doc.data() as Map<String, dynamic>;
-      final name = (data['name'] ?? '').toString().trim().toLowerCase();
+      final name = _normalize((data['name'] ?? '').toString());
       if (widget.serviceId != null && doc.id == widget.serviceId) return false;
       return name == newName;
     });
@@ -199,7 +237,7 @@ class _AddNursingServiceScreenState extends State<AddNursingServiceScreen> {
       return;
     }
 
-    // Check sub-service duplicates globally
+    // --- Check sub-service duplicates globally
     final hasDuplicateSubGlobal = await _hasDuplicateSubServiceGlobal();
     if (hasDuplicateSubGlobal) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -236,17 +274,9 @@ class _AddNursingServiceScreenState extends State<AddNursingServiceScreen> {
   }
 
   @override
-  void dispose() {
-    serviceNameController.dispose();
-    descriptionController.dispose();
-    subServiceNameController.dispose();
-    subServicePriceController.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final isEdit = widget.existingData != null;
+
     return Scaffold(
       appBar: AppBar(title: Text(isEdit ? "Edit Service" : "Add Service")),
       body: SingleChildScrollView(
@@ -303,7 +333,8 @@ class _AddNursingServiceScreenState extends State<AddNursingServiceScreen> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  ElevatedButton(onPressed: _addSubService, child: const Text("Add")),
+                  ElevatedButton(
+                      onPressed: _addSubService, child: const Text("Add")),
                 ],
               ),
               const SizedBox(height: 12),
