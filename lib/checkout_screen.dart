@@ -7,25 +7,37 @@ import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
 import 'invoice_screen.dart';
 import 'package:flutter/services.dart';
-
+import 'package:muyassir_app/PaymentSuccessAnimation.dart';
 // This formatter automatically adds a "/" after the first two digits
 // when typing an expiry date like "MM/YY"
 class ExpiryDateFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
       TextEditingValue oldValue, TextEditingValue newValue) {
-    var text = newValue.text;
-    if (text.length == 2 && !text.contains('/')) text = '$text/';
-    if (text.length == 2 && text.endsWith('/')) text = text.substring(0, 1);
-    if (text.length > 5) text = text.substring(0, 5);
+
+    String text = newValue.text.replaceAll("/", "");
+
+    // Limit to 4 numbers (MMYY)
+    if (text.length > 4) {
+      text = text.substring(0, 4);
+    }
+
+    String formatted = "";
+    if (text.length >= 2) {
+      formatted = text.substring(0, 2) + "/" + text.substring(2);
+    } else {
+      formatted = text;
+    }
+
     return TextEditingValue(
-      text: text,
-      selection: TextSelection.collapsed(offset: text.length),
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
     );
   }
 }
 
-// Checkout screen where user confirms payment, delivery and address
+
+// Checkout      text: text, screen where user confirms payment, delivery and address
 class CheckoutScreen extends StatefulWidget {
   final double total; // total amount from cart
   final String pharmacyId; // pharmacy ID to link the order
@@ -221,6 +233,26 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(msg)));
 
+      /// 🔥🔥 الدفع بالكارد → تشغيل الأنيميشن ثم الانتقال للفاتورة 🔥🔥
+      if (_paymentMethod == "card") {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => SuccessPaymentScreen(
+              orderId: placedOrderRef.id,
+              total: widget.total + deliveryFee,
+              address: _address ??
+                  "Lat: ${_selectedLocation.latitude}, Lng: ${_selectedLocation.longitude}",
+              phone: _phoneController.text,
+              paymentMethod: _paymentMethod,
+            ),
+          ),
+        );
+
+        return; // مهم جداً → يمنع الانتقال مرتين
+      }
+
+
       // move user to invoice page after success
       Navigator.pushReplacement(
         context,
@@ -240,6 +272,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           .showSnackBar(SnackBar(content: Text("Error: $e")));
     }
   }
+
 
   // UI part starts here
   @override

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'cart_screen.dart';
+import 'localization.dart';
+import 'package:translator/translator.dart';
 
 class LabTestListUser extends StatefulWidget {
   final String labId;
@@ -19,8 +21,44 @@ class _LabTestListUserState extends State<LabTestListUser> {
   FirebaseFirestore.instance.collection('orders');
   final FirebaseAuth auth = FirebaseAuth.instance;
 
-  List<String> cartTestNames = []; // ✅ قائمة باسماء التستس الموجودة في السلة
-  String? cartLabId; // ✅ لتحديد إذا السلة من لاب آخر
+  final GoogleTranslator translator = GoogleTranslator();
+
+  Map<String, String> nameCache = {};
+  Map<String, String> descriptionCache = {};
+  Map<String, String> instructionCache = {};
+
+  List<String> cartTestNames = [];
+  String? cartLabId;
+
+  String formatPrice(double price, String lang) {
+    if (lang == 'ar') {
+      const arabicDigits = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
+      final priceStr = price.toStringAsFixed(2);
+      return priceStr.split('').map((c) {
+        if (RegExp(r'\d').hasMatch(c)) {
+          return arabicDigits[int.parse(c)];
+        }
+        return c;
+      }).join();
+    } else {
+      return price.toStringAsFixed(2);
+    }
+  }
+
+  // عرض النص مباشرة بدون انتظار، وترجمته في الخلفية
+  String translateCachedImmediate(String text, Map<String, String> cache) {
+    if (Localizations.localeOf(context).languageCode == 'en') return text;
+
+    if (cache.containsKey(text)) return cache[text]!;
+
+    translator.translate(text, to: Localizations.localeOf(context).languageCode).then((value) {
+      setState(() {
+        cache[text] = value.text;
+      });
+    });
+
+    return text;
+  }
 
   @override
   void initState() {
@@ -43,13 +81,67 @@ class _LabTestListUserState extends State<LabTestListUser> {
   }
 
   Future<void> _addToCart(Map<String, dynamic> test) async {
+    final t = AppLocalization.of(context)!;
     final user = auth.currentUser;
     if (user == null) return;
 
-    // 🔹 Get current cart
     final currentCart = await ordersCollection
         .where('userId', isEqualTo: user.uid)
         .get();
+
+    if (currentCart.docs.isNotEmpty) {
+      final firstItem = currentCart.docs.first.data() as Map<String, dynamic>;
+      final existingType = firstItem['providerType'] ?? '';
+      final existingProviderId =
+          firstItem['labId'] ?? firstItem['pharmacyId'] ?? firstItem['hospitalId'];
+
+      const newType = 'lab';
+      final newProviderId = widget.labId;
+
+      if (existingType != newType || (existingProviderId != null && existingProviderId != newProviderId)) {
+        final shouldClear = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(t.translate("Start a new cart?")),
+            content: Text(
+              existingType != newType
+                  ? t.translate(
+                  "Your cart already contains ${existingType} services.\nDo you want to clear it and add this test instead?")
+                  : t.translate(
+                  "Your cart already contains items from another lab.\nDo you want to clear it and add this test instead?"),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: Text(
+                  t.translate("Cancel"),
+                  style: const TextStyle(color: Colors.grey),
+                ),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context, true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blueAccent,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: Text(t.translate("Start")),
+              ),
+            ],
+          ),
+        );
+
+        if (shouldClear != true) return;
+
+        for (var doc in currentCart.docs) {
+          await ordersCollection.doc(doc.id).delete();
+        }
+
+        cartTestNames.clear();
+        cartLabId = null;
+      }
+    }
 
     cartTestNames = currentCart.docs
         .map((doc) {
@@ -63,42 +155,8 @@ class _LabTestListUserState extends State<LabTestListUser> {
         ? (currentCart.docs.first.data() as Map<String, dynamic>)['labId']
         : null;
 
-    // 🔹 Check if cart is from another lab
-    if (cartLabId != null && cartLabId != widget.labId) {
-      final shouldReplace = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text("Items in Cart"),
-          content: const Text(
-              "Your cart has items from another lab. Do you want to remove them and add this test?"),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text("Cancel"),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text("Remove & Add"),
-            ),
-          ],
-        ),
-      );
-
-      if (shouldReplace != true) return;
-
-      // 🔹 Remove old items
-      for (var doc in currentCart.docs) {
-        await ordersCollection.doc(doc.id).delete();
-      }
-
-      cartTestNames.clear();
-      cartLabId = null;
-    }
-
-    // 🔹 Prevent duplicates
     if (cartTestNames.contains(test['name'])) return;
 
-    // 🔹 Add new test
     await ordersCollection.add({
       'userId': user.uid,
       'name': test['name'] ?? '',
@@ -119,16 +177,17 @@ class _LabTestListUserState extends State<LabTestListUser> {
       cartLabId = widget.labId;
     });
 
-    // 🔹 Confirmation dialog
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Added to Cart ✅"),
-        content: Text("${test['name']} has been added to your cart."),
+        title: Text(t.translate("Added to Cart ✅")),
+        content: Text(
+          "${translateCachedImmediate(test['name'] ?? '', nameCache)} ${t.translate("added_to_cart")}",
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text("Add More"),
+            child: Text(t.translate("Add More")),
           ),
           ElevatedButton(
             onPressed: () {
@@ -138,21 +197,24 @@ class _LabTestListUserState extends State<LabTestListUser> {
                 MaterialPageRoute(builder: (_) => CartScreen()),
               );
             },
-            child: const Text("Go to Cart"),
+            child: Text(t.translate("Go to Cart")),
           ),
         ],
       ),
     );
   }
 
-
   @override
   Widget build(BuildContext context) {
+    final t = AppLocalization.of(context)!;
     final labId = widget.labId;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final instructionBg = isDark ? Colors.blueGrey[800] : Colors.blue[200];
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Lab Tests'),
+        title: Text(t.translate("Lab Tests")),
         backgroundColor: Colors.blue[400],
         actions: [
           IconButton(
@@ -172,8 +234,7 @@ class _LabTestListUserState extends State<LabTestListUser> {
             .orderBy('createdAt', descending: true)
             .snapshots(),
         builder: (context, testSnapshot) {
-          if (!testSnapshot.hasData)
-            return const Center(child: CircularProgressIndicator());
+          if (!testSnapshot.hasData) return const SizedBox();
 
           final tests = testSnapshot.data!.docs.map((doc) {
             final map = doc.data() as Map<String, dynamic>;
@@ -186,17 +247,15 @@ class _LabTestListUserState extends State<LabTestListUser> {
                 .where('userId', isEqualTo: auth.currentUser!.uid)
                 .snapshots(),
             builder: (context, cartSnapshot) {
-              if (!cartSnapshot.hasData)
-                return const Center(child: CircularProgressIndicator());
+              if (!cartSnapshot.hasData) return const SizedBox();
 
               final cartTestNames = cartSnapshot.data!.docs
                   .map((doc) {
                 final data = doc.data() as Map<String, dynamic>;
-                return data['name'] ?? data['testName'] ?? '';
+                return data['name'] ?? '';
               })
                   .where((name) => name.isNotEmpty)
                   .toList();
-
 
               return ListView.builder(
                 padding: const EdgeInsets.all(16),
@@ -204,8 +263,7 @@ class _LabTestListUserState extends State<LabTestListUser> {
                 itemBuilder: (context, index) {
                   final test = tests[index];
                   final isInCart = cartTestNames.contains(test['name']);
-
-                  return _buildTestCard(test, isInCart);
+                  return _buildTestCard(test, isInCart, textColor, instructionBg!);
                 },
               );
             },
@@ -215,54 +273,76 @@ class _LabTestListUserState extends State<LabTestListUser> {
     );
   }
 
-  Widget _buildTestCard(Map<String, dynamic> test, bool isInCart) {
+  Widget _buildTestCard(Map<String, dynamic> test, bool isInCart, Color textColor, Color instructionBg) {
+    final t = AppLocalization.of(context)!;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     List<String> instructions = List<String>.from(test['instructions'] ?? []);
+
+    final translatedName = translateCachedImmediate(test['name'] ?? '', nameCache);
+    final translatedDescription = translateCachedImmediate(test['description'] ?? '', descriptionCache);
+    final translatedInstructions = instructions.map((i) => translateCachedImmediate(i, instructionCache)).toList();
+
+    final instructionWidgets = translatedInstructions.map((i) => Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text("• ", style: TextStyle(color: isDark ? Colors.white70 : Colors.black87)),
+        Expanded(child: Text(i, style: TextStyle(color: textColor))),
+      ],
+    )).toList();
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.grey[200],
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.grey[200],
         borderRadius: BorderRadius.circular(12),
-        boxShadow: const [
-          BoxShadow(color: Colors.grey, blurRadius: 4, offset: Offset(0, 2))
+        boxShadow: [
+          BoxShadow(
+            color: isDark ? Colors.black54 : Colors.grey.withOpacity(0.5),
+            blurRadius: 6,
+            offset: const Offset(0, 3),
+          ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(test['name'] ?? '',
-              style:
-              const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          // الاسم
+          Row(
+            children: [
+              const Icon(Icons.biotech, size: 20, color: Colors.blue),
+              const SizedBox(width: 6),
+              Text(translatedName, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
+            ],
+          ),
+          // الوصف
           if ((test['description'] ?? '').isNotEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Text(test['description'] ?? '',
-                  style:
-                  const TextStyle(fontSize: 14, color: Colors.black87)),
+              child: Text(translatedDescription, style: TextStyle(fontSize: 14, color: textColor.withOpacity(0.8))),
             ),
+          // السعر
+          if ((test['price'] ?? 0) > 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Text("${t.translate("Price")}: ${formatPrice((test['price'] ?? 0).toDouble(), Localizations.localeOf(context).languageCode)}",
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: isDark ? Colors.tealAccent : Colors.black)),
+            ),
+          // التعليمات
           if (instructions.isNotEmpty) ...[
             const SizedBox(height: 6),
-            const Text('Instructions:',
-                style:
-                TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+            Text(t.translate("Instructions") + ":", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: textColor)),
             const SizedBox(height: 4),
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                  color: Colors.blue[200],
-                  borderRadius: BorderRadius.circular(8)),
+                color: instructionBg,
+                borderRadius: BorderRadius.circular(8),
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: instructions
-                    .map((i) => Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text("• "),
-                    Expanded(child: Text(i))
-                  ],
-                ))
-                    .toList(),
+                children: instructionWidgets,
               ),
             ),
           ],
@@ -273,12 +353,13 @@ class _LabTestListUserState extends State<LabTestListUser> {
               ElevatedButton(
                 onPressed: isInCart ? null : () => _addToCart(test),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor:
-                  isInCart ? Colors.black : Colors.blue[400],
+                  backgroundColor: isInCart ? Colors.grey[700] : Colors.blue[400],
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
-                child: Text(isInCart ? "In Cart" : "Add to Cart"),
+                child: Text(isInCart ? t.translate("In Cart") : t.translate("Add to Cart"),
+                    style: const TextStyle(color: Colors.white)),
               ),
-
             ],
           ),
         ],
@@ -286,4 +367,3 @@ class _LabTestListUserState extends State<LabTestListUser> {
     );
   }
 }
- 

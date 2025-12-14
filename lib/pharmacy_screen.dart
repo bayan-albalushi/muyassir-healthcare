@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:lottie/lottie.dart';
 import 'order_medicine_screen.dart'; // 👈 استدعاء صفحة الطلب
 
 class PharmacyScreen extends StatefulWidget {
@@ -45,6 +46,19 @@ class _PharmacyScreenState extends State<PharmacyScreen> {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
+
+
+            Center(
+              child: SizedBox(
+                height: 160,
+                child: Lottie.asset(
+                  "assets/lottie/pharmacy.json", // غيّري للمسار الصحيح
+                  fit: BoxFit.contain,
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+
             // 🔎 Search box
             TextField(
               onChanged: (val) {
@@ -75,7 +89,9 @@ class _PharmacyScreenState extends State<PharmacyScreen> {
                     .collection('users')
                     .where('role', isEqualTo: 'provider')
                     .where('providerType', isEqualTo: 'Pharmacy')
+                    .where('status', isEqualTo: "accepted")   // ✨ الشرط المهم
                     .snapshots(),
+
                 builder: (context, snapshot) {
                   if (snapshot.hasError) {
                     return Center(
@@ -85,7 +101,6 @@ class _PharmacyScreenState extends State<PharmacyScreen> {
                     return const Center(child: CircularProgressIndicator());
                   }
 
-                  // فلترة حسب السيرتش
                   final docs = snapshot.data!.docs.where((doc) {
                     final data = doc.data() as Map<String, dynamic>;
                     final companyName =

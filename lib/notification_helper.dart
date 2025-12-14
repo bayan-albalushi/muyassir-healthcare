@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'NotificationService.dart'; // for in-app
 
-/*
+
 class NotificationHelper {
   static const _emailServiceId = 'service_jfxeute';
   static const _emailTemplateId = 'template_bqxd5w1';
@@ -80,4 +80,3 @@ class NotificationHelper {
     // await http.post(Uri.parse('https://api.twilio.com/...'), headers: {...}, body: {...});
   }
 }
-*/

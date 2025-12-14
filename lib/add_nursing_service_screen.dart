@@ -287,11 +287,31 @@ class _AddNursingServiceScreenState extends State<AddNursingServiceScreen> {
             children: [
               TextFormField(
                 controller: serviceNameController,
-                decoration: const InputDecoration(
+                readOnly: widget.existingData != null, // prevent editing
+                decoration: InputDecoration(
                   labelText: "Service Name",
-                  prefixIcon: Icon(Icons.medical_services),
-                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.medical_services,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.blue[200]
+                          : Colors.blue),
+                  border: const OutlineInputBorder(),
+                  filled: widget.existingData != null,
+                  fillColor: widget.existingData != null
+                      ? (Theme.of(context).brightness == Brightness.dark
+                      ? const Color(0xFF2A2A2A) // darker gray for dark mode
+                      : Colors.grey.shade200)
+                      : null,
                 ),
+                style: TextStyle(
+                  color: widget.existingData != null
+                      ? (Theme.of(context).brightness == Brightness.dark
+                      ? Colors.white
+                      : Colors.black)
+                      : (Theme.of(context).brightness == Brightness.dark
+                      ? Colors.white
+                      : Colors.black),
+                ),
+
                 validator: (v) => v == null || v.trim().isEmpty
                     ? "Please enter service name"
                     : null,

@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:lottie/lottie.dart'; // ⭐ مهم لعرض Doctor.json
 
 class ChatScreen extends StatefulWidget {
-  final String orderId; // good: clear what this is used for
-  final String userRole; // nice: you separate logic for user/pharmacy
+  final String orderId;
+  final String userRole;
 
   const ChatScreen({
     super.key,
@@ -20,15 +21,14 @@ class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final user = FirebaseAuth.instance.currentUser;
 
-  String chatWithName = ""; // clean: holds display name of other person
+  String chatWithName = "";
 
   @override
   void initState() {
     super.initState();
-    _loadChatPartner(); // good practice: async call isolated
+    _loadChatPartner();
   }
 
-  // 👇 Loads the name of the other chat participant based on role
   Future<void> _loadChatPartner() async {
     final orderDoc = await FirebaseFirestore.instance
         .collection('placedOrders')
@@ -39,7 +39,6 @@ class _ChatScreenState extends State<ChatScreen> {
       final orderData = orderDoc.data() as Map<String, dynamic>;
 
       if (widget.userRole == "user") {
-        // user chatting with pharmacy
         final pharmacyId = orderData['pharmacyId'];
         if (pharmacyId != null) {
           final pharmacyDoc = await FirebaseFirestore.instance
@@ -53,7 +52,6 @@ class _ChatScreenState extends State<ChatScreen> {
           }
         }
       } else {
-        // pharmacy chatting with user
         final userId = orderData['userId'];
         if (userId != null) {
           final userDoc = await FirebaseFirestore.instance
@@ -74,7 +72,6 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  // 👇 Sends a message to Firestore (simple and effective)
   Future<void> _sendMessage() async {
     if (_messageController.text.trim().isEmpty) return;
 
@@ -95,17 +92,18 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        // neat dynamic title
-        title: Text(chatWithName.isEmpty
-            ? (widget.userRole == "user"
-            ? "Chat with Pharmacy"
-            : "Chat with User")
-            : "Chat with $chatWithName"),
+        title: Text(
+          chatWithName.isEmpty
+              ? (widget.userRole == "user"
+              ? "Chat with Pharmacy"
+              : "Chat with User")
+              : "Chat with $chatWithName",
+        ),
         backgroundColor: Colors.blue[400],
       ),
+
       body: Column(
         children: [
-          // messages section
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
@@ -120,7 +118,39 @@ class _ChatScreenState extends State<ChatScreen> {
 
                 final docs = snapshot.data!.docs;
 
-                // neat use of reverse: true for bottom alignment
+                // ⭐⭐⭐ إذا الشات فاضي → أظهر Doctor.json
+                if (docs.isEmpty) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Lottie.asset(
+                          "assets/lottie/Doctor.json",
+                          width: 220,
+                        ),
+                        const SizedBox(height: 20),
+                        const Text(
+                          "No messages yet",
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey,
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        const Text(
+                          "Start the conversation 👇",
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
+                // ⭐⭐⭐ إذا فيه رسائل → اعرضها كالعادة
                 return ListView.builder(
                   reverse: true,
                   itemCount: docs.length,
@@ -128,7 +158,6 @@ class _ChatScreenState extends State<ChatScreen> {
                     final data = docs[index].data() as Map<String, dynamic>;
                     final isMe = data['senderId'] == user?.uid;
 
-                    // bubble UI
                     return Align(
                       alignment: isMe
                           ? Alignment.centerRight
@@ -160,10 +189,9 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
 
-          // input bar
+          // ⭐ Input Bar
           Container(
-            padding:
-            const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             color: Colors.grey[200],
             child: Row(
               children: [

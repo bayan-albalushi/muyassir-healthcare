@@ -1,12 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'add_nursing_service_screen.dart';
-import 'cart_screen.dart'; // ✅ عشان يفتح الكارت العام
+import 'cart_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class NursingServicesScreen extends StatefulWidget {
   final String hospitalId;
-  final String userRole; // 'user' or 'provider'
+  final String userRole;
 
   const NursingServicesScreen({
     super.key,
@@ -24,7 +24,33 @@ class _NursingServicesScreenState extends State<NursingServicesScreen> {
 
   final List<Map<String, dynamic>> selectedServices = [];
 
-  // ✅ دالة تعرض تنبيه استبدال الكارت (موحدة)
+  // -----------------------------
+  // 🎨 Dark Mode Aware Colors
+  // -----------------------------
+  Color _bgColor(BuildContext context) =>
+      Theme.of(context).scaffoldBackgroundColor;
+
+  Color _cardColor(BuildContext context) =>
+      Theme.of(context).cardColor;
+
+  Color _tileColor(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? Colors.grey.shade800
+          : Colors.grey.shade50;
+
+  Color _textColor(BuildContext context) =>
+      Theme.of(context).textTheme.bodyMedium!.color!;
+
+  Color _subtitleColor(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? Colors.white70
+          : Colors.black54;
+
+  Color _buttonColor(bool selected) =>
+      selected ? Colors.green : Colors.blueAccent;
+
+  // ------------------------------
+
   Future<bool?> _showReplaceDialog(String existing, String newItem) {
     return showDialog<bool>(
       context: context,
@@ -47,40 +73,35 @@ class _NursingServicesScreenState extends State<NursingServicesScreen> {
     );
   }
 
-  // ✅ إضافة الخدمات للسلة مع التحقق
   Future<void> _addServicesToCart() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
     final ordersRef = FirebaseFirestore.instance.collection('orders');
 
-    // تحقق من محتوى الكارت
     final existingOrders =
     await ordersRef.where("userId", isEqualTo: user.uid).get();
 
     if (existingOrders.docs.isNotEmpty) {
-      final firstItem = existingOrders.docs.first.data() as Map<String, dynamic>;
+      final firstItem =
+      existingOrders.docs.first.data() as Map<String, dynamic>;
       final existingType =
           firstItem['providerType'] ?? firstItem['serviceType'] ?? "";
       final existingHospital = firstItem['hospitalId'] ?? "";
 
-      // إذا فيه نوع مختلف أو مستشفى مختلف
       if (existingType != "hospital" || existingHospital != widget.hospitalId) {
         final confirm = await _showReplaceDialog(
             existingType.isEmpty ? "other items" : existingType,
             "hospital services");
-        if (confirm != true) {
-          return; // Cancel → لا يضيف شيء
-        }
 
-        // Replace → نحذف كل شي قديم
+        if (confirm != true) return;
+
         for (var doc in existingOrders.docs) {
           await doc.reference.delete();
         }
       }
     }
 
-    // ✅ إضافة الخدمات الجديدة
     for (var service in selectedServices) {
       await ordersRef.add({
         'userId': user.uid,
@@ -90,7 +111,7 @@ class _NursingServicesScreenState extends State<NursingServicesScreen> {
         'parentService': service['parentService'],
         'price': service['price'],
         'quantity': 1,
-        'serviceType': 'hospital', // نحدد أنه من hospital
+        'providerType': 'hospital',
         'timestamp': FieldValue.serverTimestamp(),
       });
     }
@@ -103,7 +124,6 @@ class _NursingServicesScreenState extends State<NursingServicesScreen> {
       const SnackBar(content: Text("Services added to cart ✅")),
     );
 
-    // ✅ افتح صفحة الكارت
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const CartScreen()),
@@ -124,15 +144,11 @@ class _NursingServicesScreenState extends State<NursingServicesScreen> {
         ]
             : null,
       ),
+
       body: Container(
+        color: _bgColor(context),
         padding: const EdgeInsets.all(16),
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFFE3F2FD), Color(0xFF90CAF9)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
+
         child: StreamBuilder<QuerySnapshot>(
           stream: servicesRef.orderBy('name').snapshots(),
           builder: (context, snapshot) {
@@ -141,7 +157,12 @@ class _NursingServicesScreenState extends State<NursingServicesScreen> {
             }
 
             if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-              return const Center(child: Text("No nursing services found."));
+              return Center(
+                child: Text(
+                  "No nursing services found.",
+                  style: TextStyle(color: _textColor(context)),
+                ),
+              );
             }
 
             final services = snapshot.data!.docs;
@@ -154,20 +175,29 @@ class _NursingServicesScreenState extends State<NursingServicesScreen> {
                 final subServices = List.from(data['subServices'] ?? []);
 
                 return Card(
+                  color: _cardColor(context),
                   elevation: 2,
                   margin: const EdgeInsets.symmetric(vertical: 8),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
+
                   child: ExpansionTile(
-                    leading:
-                    const Icon(Icons.medical_services, color: Colors.blue),
+                    leading: const Icon(Icons.medical_services,
+                        color: Colors.blue),
                     title: Text(
                       data['name'] ?? 'No name',
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 16),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: _textColor(context),
+                      ),
                     ),
-                    subtitle: Text(data['description'] ?? ''),
+                    subtitle: Text(
+                      data['description'] ?? '',
+                      style: TextStyle(color: _subtitleColor(context)),
+                    ),
+
                     children: [
                       Padding(
                         padding: const EdgeInsets.symmetric(
@@ -176,17 +206,26 @@ class _NursingServicesScreenState extends State<NursingServicesScreen> {
                           children: subServices.map((sub) {
                             final isSelected = selectedServices
                                 .any((e) => e['id'] == sub['id']);
+
                             return Card(
-                              color: Colors.grey[50],
+                              color: _tileColor(context),
                               margin: const EdgeInsets.symmetric(vertical: 4),
+
                               child: ListTile(
-                                leading: const Icon(Icons.arrow_right),
-                                title: Text(sub['name'] ?? ''),
+                                leading:
+                                const Icon(Icons.arrow_right, color: Colors.blue),
+                                title: Text(
+                                  sub['name'] ?? '',
+                                  style: TextStyle(color: _textColor(context)),
+                                ),
+
                                 subtitle: Text(
                                   sub['price'] != null
                                       ? "Price: ${sub['price']} OMR"
                                       : "Price not set",
+                                  style: TextStyle(color: _subtitleColor(context)),
                                 ),
+
                                 trailing: widget.userRole == 'user'
                                     ? ElevatedButton(
                                   onPressed: () {
@@ -205,13 +244,14 @@ class _NursingServicesScreenState extends State<NursingServicesScreen> {
                                     });
                                   },
                                   style: ElevatedButton.styleFrom(
-                                    backgroundColor: isSelected
-                                        ? Colors.green
-                                        : Colors.blueAccent,
+                                    backgroundColor:
+                                    _buttonColor(isSelected),
                                   ),
-                                  child: Text(isSelected
-                                      ? "Selected"
-                                      : "Select"),
+                                  child: Text(
+                                    isSelected ? "Selected" : "Select",
+                                    style: const TextStyle(
+                                        color: Colors.white),
+                                  ),
                                 )
                                     : null,
                               ),
@@ -220,7 +260,6 @@ class _NursingServicesScreenState extends State<NursingServicesScreen> {
                         ),
                       ),
 
-                      // Provider: Edit/Delete Buttons
                       if (widget.userRole == 'provider')
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -246,12 +285,14 @@ class _NursingServicesScreenState extends State<NursingServicesScreen> {
                                     await servicesRef
                                         .doc(service.id)
                                         .update(result);
+
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
                                         content: Text(
-                                            "Service '${result['name'] ?? 'Service'}' updated!"),
+                                            "Service '${result['name']}' updated"),
                                       ),
                                     );
+
                                     setState(() {});
                                   }
                                 },
@@ -263,8 +304,9 @@ class _NursingServicesScreenState extends State<NursingServicesScreen> {
                                   await servicesRef.doc(service.id).delete();
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
-                                        content: Text(
-                                            "Service '${data['name']}' deleted")),
+                                      content: Text(
+                                          "Service '${data['name']}' deleted"),
+                                    ),
                                   );
                                 },
                               ),
@@ -280,9 +322,10 @@ class _NursingServicesScreenState extends State<NursingServicesScreen> {
         ),
       ),
 
-      // Floating Add Button for Provider
       floatingActionButton: widget.userRole == 'provider'
           ? FloatingActionButton(
+        backgroundColor: Colors.blueAccent,
+        child: const Icon(Icons.add),
         onPressed: () async {
           final result = await Navigator.push(
             context,
@@ -296,15 +339,12 @@ class _NursingServicesScreenState extends State<NursingServicesScreen> {
             await servicesRef.add(result);
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text(
-                    "Service '${result['name'] ?? 'New Service'}' added!"),
-              ),
+                  content: Text(
+                      "Service '${result['name'] ?? 'New Service'}' added!")),
             );
             setState(() {});
           }
         },
-        backgroundColor: Colors.blueAccent,
-        child: const Icon(Icons.add),
       )
           : null,
     );

@@ -2,31 +2,53 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'LabTestListUser.dart';
 import 'cart_screen.dart';
+import 'localization.dart';
+import 'package:translator/translator.dart';
 
-
-class LabsScreen extends StatelessWidget {
+class LabsScreen extends StatefulWidget {
   const LabsScreen({super.key});
 
   @override
+  State<LabsScreen> createState() => _LabsScreenState();
+}
+
+class _LabsScreenState extends State<LabsScreen> {
+  final GoogleTranslator translator = GoogleTranslator();
+
+  Map<String, String> nameCache = {};
+  Map<String, String> emailCache = {};
+
+  Future<String> translateCached(String text, String lang, bool isName) async {
+    if (lang == 'en') return text;
+
+    // اختيار الكاش
+    final cache = isName ? nameCache : emailCache;
+
+    if (cache.containsKey(text)) return cache[text]!;
+
+    translator.translate(text, to: lang).then((value) {
+      setState(() {
+        cache[text] = value.text;
+      });
+    });
+
+    return text; // مؤقتاً أعرض النص الأصلي
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final t = AppLocalization.of(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final backgroundColor = isDark ? const Color(0xFF121212) : Colors.white;
+    final textColor = isDark ? Colors.white : Colors.black87;
+
+    final lang = Localizations.localeOf(context).languageCode;
+
     return Scaffold(
+      backgroundColor: backgroundColor,
       appBar: AppBar(
-        title: const Text("Available Labs"),
-        backgroundColor: Colors.blue[400],
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.shopping_cart),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const CartScreen(
-                  ),
-                ),
-              );
-            },
-          ),
-        ],
+        title: Text(t.translate("Available Labs")),
+        backgroundColor: isDark ? Colors.teal.shade700 : Colors.blue[400],
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
@@ -39,12 +61,13 @@ class LabsScreen extends StatelessWidget {
             return const Center(child: CircularProgressIndicator());
           }
 
-          if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
-          }
-
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(child: Text("No labs available."));
+            return Center(
+              child: Text(
+                t.translate("No labs available."),
+                style: TextStyle(color: textColor, fontSize: 16),
+              ),
+            );
           }
 
           final labs = snapshot.data!.docs;
@@ -53,27 +76,61 @@ class LabsScreen extends StatelessWidget {
             itemCount: labs.length,
             itemBuilder: (context, index) {
               final lab = labs[index];
-              final labName = lab['companyName'] ?? 'Unnamed Lab';
-              final labEmail = lab['email'] ?? 'No email';
               final labId = lab.id;
 
-              return Card(
-                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: ListTile(
-                  leading: const Icon(Icons.biotech, color: Colors.blue),
-                  title: Text(labName),
-                  subtitle: Text(labEmail),
-                  trailing: const Icon(Icons.arrow_forward_ios, size: 18),
-                  onTap: () {
-                    // 👇 هذا هو الجزء المهم
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => LabTestListUser(labId: labId),
+              final name = lab['companyName'] ?? 'Unnamed Lab';
+              final email = lab['email'] ?? 'No email';
+
+              return FutureBuilder(
+                future: Future.wait([
+                  translateCached(name, lang, true),
+                  translateCached(email, lang, false),
+                ]),
+                builder: (context, AsyncSnapshot<List<String>> translated) {
+                  if (!translated.hasData) {
+                    return Card(
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
+                      child: ListTile(
+                        leading:
+                        const Icon(Icons.biotech, color: Colors.blue),
+                        title: Text(name, style: TextStyle(color: textColor)),
+                        subtitle: Text(email,
+                            style: TextStyle(
+                                color: textColor.withOpacity(0.7))),
                       ),
                     );
-                  },
-                ),
+                  }
+
+                  final labName = translated.data![0];
+                  final labEmail = translated.data![1];
+
+                  return Card(
+                    margin:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: ListTile(
+                      leading: const Icon(Icons.biotech, color: Colors.blue),
+                      title:
+                      Text(labName, style: TextStyle(color: textColor)),
+                      subtitle: Text(labEmail,
+                          style: TextStyle(
+                              color: textColor.withOpacity(0.7))),
+                      trailing: Icon(Icons.arrow_forward_ios,
+                          size: 18,
+                          color: isDark
+                              ? Colors.white70
+                              : Colors.black45),
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => LabTestListUser(labId: labId),
+                          ),
+                        );
+                      },
+                    ),
+                  );
+                },
               );
             },
           );

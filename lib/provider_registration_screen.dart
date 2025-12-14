@@ -4,17 +4,20 @@ import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:convert';
-import 'encrypt_helper.dart'; // AES encryption helper
+import 'encrypt_helper.dart';
+import 'localization.dart';
 
 class ProviderRegistrationScreen extends StatefulWidget {
   const ProviderRegistrationScreen({super.key});
 
   @override
-  State<ProviderRegistrationScreen> createState() => _ProviderRegistrationScreenState();
+  State<ProviderRegistrationScreen> createState() =>
+      _ProviderRegistrationScreenState();
 }
 
 class _ProviderRegistrationScreenState extends State<ProviderRegistrationScreen> {
   final _formKey = GlobalKey<FormState>();
+
   final nameController = TextEditingController();
   final providerNameController = TextEditingController();
   final emailController = TextEditingController();
@@ -28,50 +31,65 @@ class _ProviderRegistrationScreenState extends State<ProviderRegistrationScreen>
   String providerType = 'Hospital';
   bool isLoading = false;
   String? errorMessage;
+
   PlatformFile? mohCertificate;
   PlatformFile? srDocument;
 
-  Future<void> pickMOHCertificate() async {
-    final result = await FilePicker.platform.pickFiles(withData: true);
-    if (result != null) {
-      setState(() => mohCertificate = result.files.first);
-    }
+  // =============================== PICKERS ===============================
+
+  Future<void> pickMOH() async {
+    final file = await FilePicker.platform.pickFiles(withData: true);
+    if (file != null) setState(() => mohCertificate = file.files.first);
   }
 
-  Future<void> pickSRDocument() async {
-    final result = await FilePicker.platform.pickFiles(withData: true);
-    if (result != null) {
-      setState(() => srDocument = result.files.first);
-    }
+  Future<void> pickCR() async {
+    final file = await FilePicker.platform.pickFiles(withData: true);
+    if (file != null) setState(() => srDocument = file.files.first);
   }
 
-  Future<String?> uploadFileToCloudinary(PlatformFile file) async {
+  // =============================== CLOUDINARY ===============================
+
+  Future<String?> uploadCloudinary(PlatformFile file) async {
     try {
-      final isImage = file.extension?.toLowerCase().contains(RegExp(r'(jpg|jpeg|png|gif|webp)')) ?? false;
-      final resourceType = isImage ? 'image' : 'raw';
-      final url = Uri.parse("https://api.cloudinary.com/v1_1/dkiqssdwj/$resourceType/upload");
+      final isImage = file.extension
+          ?.toLowerCase()
+          .contains(RegExp(r'(jpg|jpeg|png|gif|webp)')) ??
+          false;
+      final type = isImage ? "image" : "raw";
 
-      final request = http.MultipartRequest('POST', url);
-      request.fields['upload_preset'] = 'first_time_cloudinary';
-      request.files.add(http.MultipartFile.fromBytes('file', file.bytes!, filename: file.name));
+      final url = Uri.parse(
+          "https://api.cloudinary.com/v1_1/dkiqssdwj/$type/upload");
 
-      final response = await request.send();
-      if (response.statusCode == 200) {
-        final responseData = jsonDecode(await response.stream.bytesToString());
-        return responseData['secure_url'];
-      } else {
-        return null;
+      final req = http.MultipartRequest("POST", url);
+      req.fields["upload_preset"] = "first_time_cloudinary";
+
+      req.files.add(http.MultipartFile.fromBytes(
+        'file',
+        file.bytes!,
+        filename: file.name,
+      ));
+
+      final res = await req.send();
+      if (res.statusCode == 200) {
+        final data = jsonDecode(await res.stream.bytesToString());
+        return data["secure_url"];
       }
+      return null;
     } catch (_) {
       return null;
     }
   }
 
+  // =============================== SUBMIT ===============================
+
   Future<void> submitRegistration() async {
+    final t = AppLocalization.of(context)!;
+
     if (!_formKey.currentState!.validate()) return;
 
     if (mohCertificate == null || srDocument == null) {
-      setState(() => errorMessage = '⚠️ Please upload both MOH Certificate and CR Document.');
+      setState(() => errorMessage = t.translate(
+          "⚠️ Please upload both MOH Certificate and CR Document."));
       return;
     }
 
@@ -80,302 +98,337 @@ class _ProviderRegistrationScreenState extends State<ProviderRegistrationScreen>
       errorMessage = null;
     });
 
-    try {
-      final email = emailController.text.trim();
-      final plainPassword = passwordController.text.trim();
-      final encryptedPassword = encryptText(plainPassword);
+    final email = emailController.text.trim();
+    final pass = passwordController.text.trim();
+    final encryptedPassword = encryptText(pass);
 
-      // ✅ تحقق من البريد المكرر
-      final existingEmail = await FirebaseFirestore.instance
-          .collection('users')
-          .where('email', isEqualTo: email)
+    try {
+      final emailCheck = await FirebaseFirestore.instance
+          .collection("users")
+          .where("email", isEqualTo: email)
           .get();
 
-      if (existingEmail.docs.isNotEmpty) {
-        setState(() {
-          errorMessage = '⚠️ This email is already registered.';
-          isLoading = false;
-        });
+      if (emailCheck.docs.isNotEmpty) {
+        setState(() => errorMessage =
+            t.translate("⚠️ This email is already registered."));
         return;
       }
 
-      final companyName = nameController.text.trim();
-      final providerName = providerNameController.text.trim();
-      final streetNumber = streetController.text.trim();
-      final buildingNumber = buildingNumberController.text.trim();
+      final comp = nameController.text.trim();
+      final prov = providerNameController.text.trim();
+      final streetNum = streetController.text.trim();
+      final buildingNum = buildingNumberController.text.trim();
 
-      // ✅ تحقق من التكرار بنفس البيانات
-      final companyQuery = await FirebaseFirestore.instance
-          .collection('users')
-          .where('companyName', isEqualTo: companyName)
+      final compQuery = await FirebaseFirestore.instance
+          .collection("users")
+          .where("companyName", isEqualTo: comp)
           .get();
 
-      if (companyQuery.docs.isNotEmpty) {
-        final matchingProvider = companyQuery.docs.where((doc) =>
-        doc['providerName'] == providerName &&
-            doc['streetNumber'] == streetNumber &&
-            doc['buildingNumber'] == buildingNumber &&
+      if (compQuery.docs.isNotEmpty) {
+        final match = compQuery.docs.where((doc) =>
+        doc['providerName'] == prov &&
+            doc['streetNumber'] == streetNum &&
+            doc['buildingNumber'] == buildingNum &&
             doc['providerType'] == providerType);
 
-        if (matchingProvider.isNotEmpty) {
-          setState(() {
-            errorMessage =
-            '⚠️ A provider with the same company, name, location, and type already exists.';
-            isLoading = false;
-          });
+        if (match.isNotEmpty) {
+          setState(() => errorMessage = t.translate(
+              "⚠️ A provider with the same information already exists."));
           return;
         }
       }
 
-      final mohUrl = await uploadFileToCloudinary(mohCertificate!);
-      final srUrl = await uploadFileToCloudinary(srDocument!);
+      final mohUrl = await uploadCloudinary(mohCertificate!);
+      final crUrl = await uploadCloudinary(srDocument!);
 
-      if (mohUrl == null || srUrl == null) throw Exception('File upload failed.');
+      if (mohUrl == null || crUrl == null) {
+        setState(() => errorMessage = t.translate("⚠️ Upload failed"));
+        return;
+      }
 
-      final authResult = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: email,
-        password: plainPassword,
-      );
+      final auth = await FirebaseAuth.instance
+          .createUserWithEmailAndPassword(email: email, password: pass);
 
-      final userId = authResult.user?.uid;
+      final userId = auth.user!.uid;
 
-      await FirebaseFirestore.instance.collection('users').doc(userId).set({
-        'companyName': companyName,
-        'providerName': providerName,
-        'email': email,
-        'phone': phoneController.text.trim(),
-        'providerType': providerType,
-        'role': 'provider',
-        'status': 'pending',
-        'encryptedPassword': encryptedPassword,
-        'mohCertificateUrl': mohUrl,
-        'srDocumentUrl': srUrl,
-        'buildingName': buildingNameController.text.trim(),
-        'streetNumber': streetNumber,
-        'buildingNumber': buildingNumber,
-        'timestamp': FieldValue.serverTimestamp(),
+      await FirebaseFirestore.instance.collection("users").doc(userId).set({
+        "companyName": comp,
+        "providerName": prov,
+        "email": email,
+        "phone": phoneController.text.trim(),
+        "providerType": providerType,
+        "role": "provider",
+        "status": "pending",
+        "encryptedPassword": encryptedPassword,
+        "mohCertificateUrl": mohUrl,
+        "srDocumentUrl": crUrl,
+        "buildingName": buildingNameController.text.trim(),
+        "streetNumber": streetNum,
+        "buildingNumber": buildingNum,
+        "timestamp": FieldValue.serverTimestamp(),
+        "hospitalId": userId,
+        "labId": userId,
       });
 
-      Navigator.pushReplacementNamed(context, '/providerSubmissionSuccess');
-    } on FirebaseAuthException catch (e) {
-      setState(() => errorMessage = e.message ?? 'Registration failed.');
+      Navigator.pushReplacementNamed(
+          context, "/providerSubmissionSuccess");
     } catch (e) {
-      setState(() => errorMessage = 'Error: ${e.toString()}');
+      setState(() => errorMessage = e.toString());
     } finally {
       setState(() => isLoading = false);
     }
   }
 
+  // =============================== UI ===============================
+
   @override
   Widget build(BuildContext context) {
+    final t = AppLocalization.of(context)!;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
+      backgroundColor:
+      isDark ? const Color(0xFF0F0F0F) : const Color(0xFFE8F2FF),
       appBar: AppBar(
         backgroundColor: Colors.blueAccent,
-        title: const Text('Provider Registration'),
-      ),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Colors.blueAccent, Colors.lightBlueAccent],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
+        title: Text(
+          t.translate("Provider Registration"),
+          style: const TextStyle(color: Colors.white),
         ),
-        child: Center(
-          child: SingleChildScrollView(
+        centerTitle: true,
+      ),
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Container(
+            width: 540,
             padding: const EdgeInsets.all(24),
-            child: Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(color: Colors.teal.shade100, blurRadius: 10, offset: const Offset(0, 6)),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF1A1A1A) : Colors.white,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    t.translate("Register as Provider"),
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  _field(nameController, "Company Name", Icons.business, isDark),
+                  const SizedBox(height: 16),
+
+                  _field(providerNameController, "Provider Name", Icons.person, isDark),
+                  const SizedBox(height: 16),
+
+                  _emailField(isDark),
+                  const SizedBox(height: 16),
+
+                  _phoneField(isDark),
+                  const SizedBox(height: 16),
+
+                  _passwordField(isDark),
+                  const SizedBox(height: 16),
+
+                  _confirmPasswordField(isDark),
+                  const SizedBox(height: 16),
+
+                  _field(buildingNameController, "Building Name", Icons.location_city, isDark),
+                  const SizedBox(height: 16),
+
+                  _field(buildingNumberController, "Building Number",
+                      Icons.confirmation_number, isDark, numeric: true),
+                  const SizedBox(height: 16),
+
+                  _field(streetController, "Street Number", Icons.add_road, isDark, numeric: true),
+                  const SizedBox(height: 16),
+
+                  DropdownButtonFormField(
+                    value: providerType,
+                    items: ["Hospital", "Lab", "Pharmacy"]
+                        .map((e) => DropdownMenuItem(
+                      value: e,
+                      child: Text(t.translate(e)),
+                    ))
+                        .toList(),
+                    onChanged: (v) => setState(() => providerType = v!),
+                    decoration: _input("Provider Type", isDark),
+                  ),
+
+                  const SizedBox(height: 26),
+
+                  _label(t.translate("Upload MOH Certificate:"), isDark),
+                  _uploadBox(
+                    mohCertificate,
+                    pickMOH,
+                    isDark,
+                    "Tap to upload MOH Certificate", // 🔹 MODIFIED
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  _label(t.translate("Upload CR Document:"), isDark),
+                  _uploadBox(
+                    srDocument,
+                    pickCR,
+                    isDark,
+                    "Tap to upload CR Document", // 🔹 MODIFIED
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  if (errorMessage != null)
+                    Text(errorMessage!, style: const TextStyle(color: Colors.red)),
+
+                  const SizedBox(height: 16),
+
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: isLoading ? null : submitRegistration,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blueAccent,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      child: isLoading
+                          ? const CircularProgressIndicator(color: Colors.white)
+                          : Text(
+                        t.translate("Submit Registration"),
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 16),
+                      ),
+                    ),
+                  ),
                 ],
-              ),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text("Register as Provider", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 20),
-
-                    // ✅ Company Name
-                    TextFormField(
-                      controller: nameController,
-                      decoration: const InputDecoration(labelText: 'Company Name', prefixIcon: Icon(Icons.business), border: OutlineInputBorder()),
-                      validator: (v) => v == null || v.trim().isEmpty ? 'Enter company name' : null,
-                    ),
-                    const SizedBox(height: 16),
-
-                    // ✅ Provider Name
-                    TextFormField(
-                      controller: providerNameController,
-                      decoration: const InputDecoration(labelText: 'Provider Name', prefixIcon: Icon(Icons.person), border: OutlineInputBorder()),
-                      validator: (v) => v == null || v.trim().isEmpty ? 'Enter provider name' : null,
-                    ),
-                    const SizedBox(height: 16),
-
-                    // ✅ Email
-                    TextFormField(
-                      controller: emailController,
-                      decoration: const InputDecoration(labelText: 'Email', prefixIcon: Icon(Icons.email), border: OutlineInputBorder()),
-                      validator: (v) {
-                        if (v == null || v.trim().isEmpty) return 'Enter email';
-                        final emailRegExp = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
-                        return emailRegExp.hasMatch(v.trim()) ? null : 'Enter a valid email';
-                      },
-                    ),
-                    const SizedBox(height: 16),
-
-                    // ✅ Phone
-                    TextFormField(
-                      controller: phoneController,
-                      decoration: const InputDecoration(labelText: 'Phone', prefixIcon: Icon(Icons.phone), border: OutlineInputBorder()),
-                      validator: (v) {
-                        if (v == null || v.trim().isEmpty) return 'Enter phone number';
-                        final phoneRegExp = RegExp(r'^((?:\+968|968)?[79]\d{7})$');
-                        return phoneRegExp.hasMatch(v.trim()) ? null : 'Enter a valid Oman phone number';
-                      },
-                    ),
-                    const SizedBox(height: 16),
-
-                    // ✅ Password
-                    TextFormField(
-                      controller: passwordController,
-                      obscureText: true,
-                      decoration: const InputDecoration(labelText: 'Password', prefixIcon: Icon(Icons.lock), border: OutlineInputBorder()),
-                      validator: (v) {
-                        if (v == null || v.trim().length < 8) return 'Password must be at least 8 characters';
-                        final passRegExp = RegExp(r'^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[!@#$%^&*(),.?":{}|<>]).{8,}$');
-                        return passRegExp.hasMatch(v)
-                            ? null
-                            : 'Must include upper, lower, number & special char';
-                      },
-                    ),
-                    const SizedBox(height: 16),
-
-                    // ✅ Confirm Password
-                    TextFormField(
-                      controller: confirmPasswordController,
-                      obscureText: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Confirm Password',
-                        prefixIcon: Icon(Icons.lock_outline),
-                        border: OutlineInputBorder(),
-                      ),
-                      validator: (v) {
-                        if (v == null || v.trim().isEmpty) return 'Confirm your password';
-                        if (v.trim() != passwordController.text.trim()) return 'Passwords do not match';
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 16),
-
-                    // ✅ Building Name
-                    TextFormField(
-                      controller: buildingNameController,
-                      decoration: const InputDecoration(labelText: 'Building Name', prefixIcon: Icon(Icons.location_city), border: OutlineInputBorder()),
-                      validator: (v) => v == null || v.trim().isEmpty ? 'Enter building name' : null,
-                    ),
-                    const SizedBox(height: 16),
-
-                    // ✅ Building Number
-                    TextFormField(
-                      controller: buildingNumberController,
-                      decoration: const InputDecoration(labelText: 'Building Number', prefixIcon: Icon(Icons.confirmation_number), border: OutlineInputBorder()),
-                      keyboardType: TextInputType.number,
-                      validator: (v) {
-                        if (v == null || v.trim().isEmpty) return 'Enter building number';
-                        final number = int.tryParse(v.trim());
-                        if (number == null || number <= 0 || number > 9999) return 'Enter valid number (1–9999)';
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 16),
-
-                    // ✅ Street Number
-                    TextFormField(
-                      controller: streetController,
-                      decoration: const InputDecoration(labelText: 'Street Number', prefixIcon: Icon(Icons.add_road), border: OutlineInputBorder()),
-                      keyboardType: TextInputType.number,
-                      validator: (v) => v == null || v.trim().isEmpty ? 'Enter street number' : null,
-                    ),
-                    const SizedBox(height: 16),
-
-                    // ✅ Provider Type
-                    DropdownButtonFormField<String>(
-                      value: providerType,
-                      items: ['Hospital', 'Lab', 'Pharmacy']
-                          .map((type) => DropdownMenuItem(value: type, child: Text(type)))
-                          .toList(),
-                      onChanged: (value) => setState(() => providerType = value!),
-                      decoration: const InputDecoration(labelText: 'Provider Type', border: OutlineInputBorder()),
-                    ),
-                    const SizedBox(height: 24),
-
-                    // ✅ Uploads
-                    const Text('Upload MOH Certificate:'),
-                    const SizedBox(height: 8),
-                    GestureDetector(
-                      onTap: pickMOHCertificate,
-                      child: Container(
-                        height: 100,
-                        decoration: BoxDecoration(border: Border.all(color: Colors.grey), borderRadius: BorderRadius.circular(12)),
-                        alignment: Alignment.center,
-                        child: mohCertificate == null
-                            ? const Text("Tap to upload MOH Certificate", style: TextStyle(color: Colors.grey))
-                            : Text(mohCertificate!.name),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    const Text('Upload CR Document:'),
-                    const SizedBox(height: 8),
-                    GestureDetector(
-                      onTap: pickSRDocument,
-                      child: Container(
-                        height: 100,
-                        decoration: BoxDecoration(border: Border.all(color: Colors.grey), borderRadius: BorderRadius.circular(12)),
-                        alignment: Alignment.center,
-                        child: srDocument == null
-                            ? const Text("Tap to upload CR Document", style: TextStyle(color: Colors.grey))
-                            : Text(srDocument!.name),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-
-                    // ✅ Error Message
-                    if (errorMessage != null)
-                      Text(errorMessage!, style: const TextStyle(color: Colors.red)),
-                    const SizedBox(height: 12),
-
-                    // ✅ Submit
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: isLoading ? null : submitRegistration,
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
-                        child: isLoading
-                            ? const CircularProgressIndicator(color: Colors.white)
-                            : const Text('Submit Registration', style: TextStyle(color: Colors.white)),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // ✅ Already Registered
-                    Center(
-                      child: TextButton(
-                        onPressed: () => Navigator.pushNamed(context, '/login'),
-                        child: const Text("Already registered? Login"),
-                      ),
-                    ),
-                  ],
-                ),
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  // =============================== HELPERS ===============================
+
+  InputDecoration _input(String label, bool isDark) {
+    final t = AppLocalization.of(context)!;
+    return InputDecoration(
+      labelText: t.translate(label),
+      filled: true,
+      fillColor: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFF5F6F8),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+    );
+  }
+
+  Widget _field(TextEditingController controller, String label, IconData icon,
+      bool isDark,
+      {bool numeric = false}) {
+    final t = AppLocalization.of(context)!;
+    return TextFormField(
+      controller: controller,
+      keyboardType: numeric ? TextInputType.number : TextInputType.text,
+      decoration: _input(label, isDark).copyWith(prefixIcon: Icon(icon)),
+      validator: (v) =>
+      v == null || v.trim().isEmpty ? t.translate("Required") : null,
+    );
+  }
+
+  Widget _emailField(bool isDark) {
+    final t = AppLocalization.of(context)!;
+    return TextFormField(
+      controller: emailController,
+      decoration: _input("Email", isDark)
+          .copyWith(prefixIcon: const Icon(Icons.email)),
+      validator: (v) {
+        if (v == null || v.trim().isEmpty) {
+          return t.translate("Enter email");
+        }
+        final emailReg =
+        RegExp(r'^[\w\.-]+@([\w-]+\.)+[\w-]{2,4}$');
+        return emailReg.hasMatch(v.trim())
+            ? null
+            : t.translate("Enter a valid email");
+      },
+    );
+  }
+
+  Widget _phoneField(bool isDark) {
+    final t = AppLocalization.of(context)!;
+    return TextFormField(
+      controller: phoneController,
+      decoration: _input("Phone", isDark)
+          .copyWith(prefixIcon: const Icon(Icons.phone)),
+      validator: (v) {
+        if (v == null || v.trim().isEmpty) {
+          return t.translate("Enter phone number");
+        }
+        return RegExp(r'^[279]\d{7}$').hasMatch(v.trim())
+            ? null
+            : t.translate(
+            "Enter a valid Oman phone number (8 digits, starts with 2, 7, or 9)");
+      },
+    );
+  }
+
+  Widget _passwordField(bool isDark) {
+    final t = AppLocalization.of(context)!;
+    return TextFormField(
+      controller: passwordController,
+      obscureText: true,
+      decoration: _input("Password", isDark)
+          .copyWith(prefixIcon: const Icon(Icons.lock)),
+      validator: (v) => v == null || v.length < 8
+          ? t.translate("Password must be at least 8 characters")
+          : null,
+    );
+  }
+
+  Widget _confirmPasswordField(bool isDark) {
+    final t = AppLocalization.of(context)!;
+    return TextFormField(
+      controller: confirmPasswordController,
+      obscureText: true,
+      decoration: _input("Confirm Password", isDark)
+          .copyWith(prefixIcon: const Icon(Icons.lock_outline)),
+      validator: (v) => v != passwordController.text
+          ? t.translate("Passwords do not match")
+          : null,
+    );
+  }
+
+  Widget _label(String text, bool isDark) {
+    return Text(text,
+        style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: isDark ? Colors.white70 : Colors.blueGrey));
+  }
+
+  // 🔹 MODIFIED: accepts translation key
+  Widget _uploadBox(
+      PlatformFile? file,
+      VoidCallback pick,
+      bool isDark,
+      String emptyTextKey,
+      ) {
+    final t = AppLocalization.of(context)!;
+    return GestureDetector(
+      onTap: pick,
+      child: Container(
+        height: 110,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFF5F6F8),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          file == null ? t.translate(emptyTextKey) : file.name,
         ),
       ),
     );

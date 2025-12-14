@@ -1,16 +1,15 @@
+import 'dart:ui';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
-import 'dart:convert';
-import 'ChatScreen.dart'; // Chat screen for pharmacy-user communication
+import 'ChatScreen.dart';
+import 'pdf_viewer_screen.dart';
 
 class ViewOrdersScreen extends StatefulWidget {
-  final String pharmacyId; // Pharmacy ID passed from login/home
+  final String pharmacyId;
 
-  const ViewOrdersScreen({
-    super.key,
-    required this.pharmacyId,
-  });
+  const ViewOrdersScreen({super.key, required this.pharmacyId});
 
   @override
   State<ViewOrdersScreen> createState() => _ViewOrdersScreenState();
@@ -18,15 +17,17 @@ class ViewOrdersScreen extends StatefulWidget {
 
 class _ViewOrdersScreenState extends State<ViewOrdersScreen>
     with SingleTickerProviderStateMixin {
-  late TabController _tabController; // Controller for tabs navigation
+  late TabController _tabController;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this); // Five order tabs
+    _tabController = TabController(length: 5, vsync: this);
   }
 
-  // Stream orders by selected status (e.g., pending, approved...)
+  // ---------------------------------------------------------------------------
+  // FETCH ORDERS
+  // ---------------------------------------------------------------------------
   Stream<QuerySnapshot> _getOrdersByStatus(List<String> statuses) {
     return FirebaseFirestore.instance
         .collection('placedOrders')
@@ -36,7 +37,6 @@ class _ViewOrdersScreenState extends State<ViewOrdersScreen>
         .snapshots();
   }
 
-  // Format Firestore timestamp into a readable string
   String _formatDate(dynamic timestamp) {
     if (timestamp is Timestamp) {
       final date = timestamp.toDate();
@@ -45,15 +45,15 @@ class _ViewOrdersScreenState extends State<ViewOrdersScreen>
     return "N/A";
   }
 
-  // Define chip colors depending on order status
   Color _statusColor(String status) {
     switch (status.toLowerCase()) {
+      case "pending":
       case "processing":
         return Colors.orange;
       case "approved":
         return Colors.green;
       case "on_delivery":
-        return Colors.purple;
+        return Colors.deepPurple;
       case "delivered":
         return Colors.blue;
       case "rejected":
@@ -63,15 +63,9 @@ class _ViewOrdersScreenState extends State<ViewOrdersScreen>
     }
   }
 
-  // Update order document in Firestore with new data
-  Future<void> _updateOrderStatus(String orderId, Map<String, dynamic> updates) async {
-    await FirebaseFirestore.instance
-        .collection('placedOrders')
-        .doc(orderId)
-        .update(updates);
-  }
-
-  /// Send email notification through EmailJS (used for updates)
+  // ---------------------------------------------------------------------------
+  // SEND EMAIL
+  // ---------------------------------------------------------------------------
   Future<void> _sendOrderEmail({
     required String toEmail,
     required String orderId,
@@ -83,129 +77,220 @@ class _ViewOrdersScreenState extends State<ViewOrdersScreen>
     const userId = "0Al4Tvd40ErWCq1IM";
 
     final url = Uri.parse("https://api.emailjs.com/api/v1.0/email/send");
-    final response = await http.post(
-      url,
-      headers: {"Content-Type": "application/json"},
-      body: jsonEncode({
-        "service_id": serviceId,
-        "template_id": templateId,
-        "user_id": userId,
-        "template_params": {
-          "to_email": toEmail,
-          "orderId": orderId,
-          "subject": subject,
-          "message": message,
-        }
-      }),
-    );
 
-    // Simple print to debug if email succeeded or failed
-    if (response.statusCode == 200) {
-      print("📧 Email sent successfully ($subject)");
-    } else {
-      print("❌ Failed to send email: ${response.body}");
+    await http.post(url,
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "service_id": serviceId,
+          "template_id": templateId,
+          "user_id": userId,
+          "template_params": {
+            "to_email": toEmail,
+            "orderId": orderId,
+            "subject": subject,
+            "message": message,
+          }
+        }));
+  }
+
+  // ---------------------------------------------------------------------------
+  // RESTORE STOCK WHEN ORDER REJECTED
+  // ---------------------------------------------------------------------------
+  Future<void> _restoreStock(String orderId) async {
+    final itemsSnap = await FirebaseFirestore.instance
+        .collection("placedOrders")
+        .doc(orderId)
+        .collection("items")
+        .get();
+
+    for (var item in itemsSnap.docs) {
+      final m = item.data();
+      final medicineId = m["medicineId"];
+      final quantity = m["quantity"] ?? 1;
+
+      if (medicineId == null) continue;
+
+      final medRef =
+      FirebaseFirestore.instance.collection("medicines").doc(medicineId);
+
+      FirebaseFirestore.instance.runTransaction((transaction) async {
+        final snap = await transaction.get(medRef);
+        if (!snap.exists) return;
+
+        final currentStock = snap["stock"] ?? 0;
+        transaction.update(medRef, {"stock": currentStock + quantity});
+      });
     }
   }
 
-  // Show dialog box when rejecting an order + collect reason
+  // ---------------------------------------------------------------------------
+  // REJECT ORDER DIALOG
+  // ---------------------------------------------------------------------------
   Future<void> _showRejectDialog(
-      String orderId, String userEmail, double total, String paymentStatus) async {
-    final reasonController = TextEditingController();
+      String orderId,
+      String userEmail,
+      double total,
+      String paymentStatus,
+      ) async {
+    final controller = TextEditingController();
+
     final result = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text("Reject Order"),
         content: TextField(
-          controller: reasonController,
+          controller: controller,
           decoration: const InputDecoration(hintText: "Enter rejection reason"),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text("Cancel"),
-          ),
+              onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
           ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, reasonController.text.trim()),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
             child: const Text("Reject"),
           ),
         ],
       ),
     );
 
-    // Only proceed if a reason was typed
-    if (result != null && result.isNotEmpty) {
-      Map<String, dynamic> updates = {
-        'status': "rejected",
-        'rejectReason': result,
-      };
+    if (result == null || result.isEmpty) return;
 
-      String message;
-      if (paymentStatus == "authorized") {
-        updates['paymentStatus'] = "refunded";
-        message =
-        "Your order has been rejected ❌\nAn amount of ${total.toStringAsFixed(3)} OMR has been refunded to your card 💳.\nReason for rejection: $result";
-      } else {
-        message =
-        "Your order has been rejected ❌\nNo payment was deducted from your account.\nReason for rejection: $result";
-      }
+    Map<String, dynamic> updates = {
+      'status': "rejected",
+      'rejectReason': result,
+    };
 
+    String message;
 
-      await _updateOrderStatus(orderId, updates);
-
-      if (userEmail.isNotEmpty) {
-        await _sendOrderEmail(
-          toEmail: userEmail,
-          orderId: orderId,
-          subject: "Prescription Rejected",
-          message: message,
-        );
-      }
+    if (paymentStatus == "authorized") {
+      updates['paymentStatus'] = "refunded";
+      message =
+      "Your order was rejected.\nRefunded: ${total.toStringAsFixed(3)} OMR\nReason: $result";
+    } else {
+      message =
+      "Your order was rejected.\nNo payment was deducted.\nReason: $result";
     }
+
+    // UPDATE STATUS
+    await FirebaseFirestore.instance
+        .collection('placedOrders')
+        .doc(orderId)
+        .update(updates);
+
+    // RESTORE STOCK
+    await _restoreStock(orderId);
+
+    // SEND EMAIL
+    await _sendOrderEmail(
+      toEmail: userEmail,
+      orderId: orderId,
+      subject: "Order Rejected",
+      message: message,
+    );
   }
 
+  // ---------------------------------------------------------------------------
+  // PREMIUM TABS
+  // ---------------------------------------------------------------------------
+  Widget _premiumTabs() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 14),
+      padding: const EdgeInsets.all(4),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.35),
+              borderRadius: BorderRadius.circular(20),
+              border:
+              Border.all(color: Colors.white.withOpacity(0.2), width: 1.2),
+            ),
+            child: TabBar(
+              controller: _tabController,
+              isScrollable: true,
+              labelPadding: const EdgeInsets.symmetric(horizontal: 20),
+              splashFactory: NoSplash.splashFactory,
+              overlayColor: MaterialStateProperty.all(Colors.transparent),
+              labelColor: Colors.blueAccent,
+              unselectedLabelColor: Colors.black87,
+              labelStyle:
+              const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              unselectedLabelStyle:
+              const TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
+              indicator: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF4FACFE), Color(0xFF00F2FE)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              ),
+              tabs: const [
+                Tab(
+                    icon: Icon(Icons.pending_actions_outlined),
+                    text: "Processing"),
+                Tab(icon: Icon(Icons.verified_outlined), text: "Approved"),
+                Tab(
+                    icon: Icon(Icons.local_shipping_outlined),
+                    text: "On Delivery"),
+                Tab(icon: Icon(Icons.inventory_2_outlined), text: "Delivered"),
+                Tab(icon: Icon(Icons.close_outlined), text: "Rejected"),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // UI
+  // ---------------------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: const Text("Orders",
-            style: TextStyle(
-                color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+        elevation: 0,
+        centerTitle: true,
         backgroundColor: Colors.blueAccent,
-        iconTheme: const IconThemeData(color: Colors.white),
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white70,
-          isScrollable: true,
-          labelStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-          tabs: const [
-            Tab(text: "Processing"),
-            Tab(text: "Approved"),
-            Tab(text: "On Delivery"),
-            Tab(text: "Delivered"),
-            Tab(text: "Rejected"),
-          ],
+        title: const Text(
+          "Orders",
+          style: TextStyle(
+              fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
         ),
       ),
-      body: TabBarView(
-        controller: _tabController,
+      body: Column(
         children: [
-          _buildOrdersList(["pending"], showPrescription: true), // pending tab
-          _buildOrdersList(["approved"], showInvoice: true),
-          _buildOrdersList(["on_delivery"], showInvoice: true),
-          _buildOrdersList(["delivered"], showInvoice: true),
-          _buildOrdersList(["rejected"], showInvoice: true),
+          const SizedBox(height: 12),
+          _premiumTabs(),
+          const SizedBox(height: 10),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildOrdersList(["pending"], showPrescription: true),
+                _buildOrdersList(["approved"]),
+                _buildOrdersList(["on_delivery"]),
+                _buildOrdersList(["delivered"]),
+                _buildOrdersList(["rejected"]),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
-  // Builds each list of orders by status
+  // ---------------------------------------------------------------------------
+  // ORDER LIST
+  // ---------------------------------------------------------------------------
   Widget _buildOrdersList(List<String> statuses,
-      {bool showPrescription = false, bool showInvoice = false}) {
+      {bool showPrescription = false}) {
     return StreamBuilder<QuerySnapshot>(
       stream: _getOrdersByStatus(statuses),
       builder: (context, snapshot) {
@@ -214,282 +299,332 @@ class _ViewOrdersScreenState extends State<ViewOrdersScreen>
         }
 
         final docs = snapshot.data!.docs;
+
         if (docs.isEmpty) {
           return Center(
-              child: Text("No ${statuses.join(', ')} orders.",
-                  style: const TextStyle(fontSize: 16)));
+              child: Text(
+                "No ${statuses.join(', ')} orders",
+                style: const TextStyle(fontSize: 16),
+              ));
         }
 
-        // Loop through orders and show cards
         return ListView.builder(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(14),
           itemCount: docs.length,
           itemBuilder: (context, index) {
             final doc = docs[index];
             final data = doc.data() as Map<String, dynamic>;
-            final orderId = doc.id;
-            final status = (data['status'] ?? "unknown").toString().toLowerCase();
-            final total = (data['total'] ?? 0).toDouble();
-            final phone = data['phone'] ?? "N/A";
-            final address = data['address'] ?? "N/A";
-            final slot = data['deliverySlot'] ?? "Not specified";
-            final date = _formatDate(data['timestamp']);
-            final userEmail = data['userEmail'] ?? "";
-            final paymentStatus = data['paymentStatus'] ?? "N/A";
-
-            return Card(
-              margin: const EdgeInsets.only(bottom: 14),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16)),
-              elevation: 3,
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Header row with order ID + status badge
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Text("Order #$orderId",
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold, fontSize: 16)),
-                        ),
-                        Chip(
-                          label: Text(status.toUpperCase(),
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold)),
-                          backgroundColor: _statusColor(status),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Basic order info
-                    Text("Total: ${total.toStringAsFixed(3)} OMR",
-                        style: const TextStyle(fontSize: 14)),
-                    Text("Phone: $phone", style: const TextStyle(fontSize: 14)),
-                    Text("Address: $address",
-                        style: const TextStyle(fontSize: 14)),
-                    Text("Delivery: $date", style: const TextStyle(fontSize: 14)),
-                    Text("Time Slot: $slot",
-                        style: const TextStyle(fontSize: 14)),
-                    const SizedBox(height: 12),
-
-                    // Chat button shown for selected statuses
-                    if (["pending", "approved", "on_delivery"].contains(status))
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: ElevatedButton.icon(
-                          icon: const Icon(Icons.chat, color: Colors.white),
-                          label: const Text("Chat with Customer",
-                              style: TextStyle(color: Colors.white)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blueAccent,
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12)),
-                          ),
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => ChatScreen(
-                                    orderId: orderId, userRole: "pharmacy"),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-
-                    const SizedBox(height: 10),
-
-                    // Status transition buttons (bottom right)
-                    // Status transition buttons (bottom right)
-                    if (status == "pending")
-                      Row(
-                        children: [
-                          // Approve
-                          Expanded(
-                            child: _buildStatusButton(
-                              context,
-                              orderId,
-                              "Mark as Approved",
-                              Colors.blue,
-                              "approved",
-                              userEmail,
-                              "Your order has been approved ✅ and will be prepared soon.",
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          // Reject (opens your existing reason dialog + sends email)
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              icon: const Icon(Icons.close, color: Colors.white),
-                              label: const Text("Reject", style: TextStyle(color: Colors.white)),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.red,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                              ),
-                              onPressed: () => _showRejectDialog(
-                                orderId,
-                                userEmail,
-                                total,
-                                paymentStatus,
-                              ),
-                            ),
-                          ),
-                        ],
-                      )
-
-
-                    else if (status == "approved")
-                      _buildStatusButton(
-                        context,
-                        orderId,
-                        "Mark as On Delivery",
-                        Colors.blue,
-                        "on_delivery",
-                        userEmail,
-                        "Your order is now on delivery 🚚 and will reach you soon!",
-                      )
-                    else if (status == "on_delivery")
-                        _buildStatusButton(
-                          context,
-                          orderId,
-                          "Mark as Delivered",
-                          Colors.blue,
-                          "delivered",
-                          userEmail,
-                          "Your order has been delivered successfully 📦. Thank you!",
-                        ),
-
-                    // Prescription image & approval/rejection logic
-                    if (showPrescription && data['prescriptionUrl'] != null)
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            "Prescription:",
-                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 6),
-                          Image.network(
-                            data['prescriptionUrl'],
-                            height: 150,
-                            fit: BoxFit.cover,
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              // Approve prescription
-                              Expanded(
-                                child: ElevatedButton(
-                                  onPressed: () async {
-                                    Map<String, dynamic> updates = {
-                                      'status': "approved",
-                                    };
-
-                                    String message;
-                                    String subject = "Order Accepted – Processing Started";
-
-                                    if (paymentStatus == "authorized") {
-                                      updates['paymentStatus'] = "captured";
-                                      message =
-                                      "Your order has been accepted and is now being processed 💳.\nWe will notify you once it’s ready for delivery.";
-                                    } else if (paymentStatus == "pending_cash") {
-                                      message =
-                                      "Your order has been accepted 💵.\nPlease prepare the cash upon delivery. We will notify you once it’s out for delivery.";
-                                    } else {
-                                      message =
-                                      "Your prescription has been accepted ✅ and is now being prepared by the pharmacy.";
-                                    }
-
-                                    await _updateOrderStatus(orderId, updates);
-
-                                    if (userEmail.isNotEmpty) {
-                                      await _sendOrderEmail(
-                                        toEmail: userEmail,
-                                        orderId: orderId,
-                                        subject: subject,
-                                        message: message,
-                                      );
-                                    }
-
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                          content: Text(
-                                              "Order accepted and moved to Approved tab ✅")),
-                                    );
-                                  },
-                                  style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.green),
-                                  child: const Text("Approve"),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-
-                              // Reject prescription
-                              Expanded(
-                                child: ElevatedButton(
-                                  onPressed: () => _showRejectDialog(
-                                      orderId, userEmail, total, paymentStatus),
-                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                                  child: const Text("Reject"),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                  ],
-                ),
-              ),
-            );
+            return _orderCard(context, doc.id, data, showPrescription);
           },
         );
       },
     );
   }
 
-  // Reusable widget for status update button
-  Widget _buildStatusButton(BuildContext context, String orderId, String text,
-      Color color, String newStatus, String email, String message) {
-    return Align(
-      alignment: Alignment.centerRight,
-      child: ElevatedButton.icon(
-        icon: const Icon(Icons.check, color: Colors.white),
-        label: Text(text, style: const TextStyle(color: Colors.white)),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: color,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+  // ---------------------------------------------------------------------------
+  // ORDER CARD — GLASS UI
+  // ---------------------------------------------------------------------------
+  Widget _orderCard(
+      BuildContext context, String orderId, Map<String, dynamic> data,
+      bool showPrescription) {
+    final status = data['status'] ?? "unknown";
+    final userEmail = data['userEmail'] ?? "";
+    final total = (data['total'] ?? 0).toDouble();
+    final paymentStatus = data['paymentStatus'] ?? "N/A";
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(26),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 20),
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor.withOpacity(0.72),
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: Colors.white.withOpacity(0.12)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // HEADER
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      "Order #$orderId",
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 17, fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: _statusColor(status).withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      status.toUpperCase(),
+                      style: TextStyle(
+                        color: _statusColor(status),
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  )
+                ],
+              ),
+
+              const SizedBox(height: 14),
+
+              _info("Total", "${total.toStringAsFixed(3)} OMR"),
+              _info("Phone", data['phone'] ?? "N/A"),
+              _info("Address", data['address'] ?? "N/A"),
+              _info("Delivery", _formatDate(data['timestamp'])),
+              _info("Time Slot", data['deliverySlot'] ?? "N/A"),
+
+              const SizedBox(height: 16),
+
+              // CHAT BUTTON
+              if (["pending", "approved", "on_delivery"].contains(status))
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.chat, color: Colors.white),
+                    label: const Text("Chat",
+                        style: TextStyle(color: Colors.white)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blueAccent,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18)),
+                    ),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ChatScreen(
+                              orderId: orderId, userRole: "pharmacy"),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+
+              const SizedBox(height: 16),
+
+              // STATUS BUTTONS
+              _buildStatusActions(
+                  context, orderId, status, userEmail, total, paymentStatus),
+
+              // PRESCRIPTION VIEWER
+              if (showPrescription) ...[
+                const SizedBox(height: 20),
+                TextButton.icon(
+                  icon:
+                  const Icon(Icons.description, color: Color(0xFF1565C0)),
+                  label: const Text("View Prescription",
+                      style: TextStyle(color: Color(0xFF1565C0))),
+                  onPressed: () {
+                    final List prescriptions =
+                    data['prescriptions'] is List
+                        ? data['prescriptions']
+                        : [];
+
+                    if (prescriptions.isEmpty &&
+                        data['prescriptionUrl'] != null) {
+                      prescriptions.add(data['prescriptionUrl']);
+                    }
+
+                    if (prescriptions.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                            content: Text("No prescriptions uploaded")),
+                      );
+                      return;
+                    }
+
+                    showDialog(
+                      context: context,
+                      builder: (_) {
+                        return AlertDialog(
+                          title: const Text("Prescription"),
+                          content: SingleChildScrollView(
+                            child: Column(
+                              children: prescriptions.map((item) {
+                                final link = item.toString().toLowerCase();
+
+                                if (link.endsWith(".pdf")) {
+                                  return ListTile(
+                                    leading: const Icon(Icons.picture_as_pdf,
+                                        size: 40, color: Colors.redAccent),
+                                    title: const Text("Open PDF"),
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => PDFViewerScreen(
+                                            url: link,
+                                            title: "Prescription PDF",
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  );
+                                }
+
+                                return Padding(
+                                  padding:
+                                  const EdgeInsets.symmetric(vertical: 6),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: Image.network(
+                                      item.toString(),
+                                      height: 180,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_, __, ___) =>
+                                      const Icon(
+                                        Icons.broken_image,
+                                        size: 40,
+                                        color: Colors.grey,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                          ),
+                          actions: [
+                            TextButton(
+                              child: const Text("Close"),
+                              onPressed: () => Navigator.pop(context),
+                            ),
+                          ],
+                        );
+                      },
+                    );
+                  },
+                ),
+              ]
+            ],
+          ),
         ),
-        onPressed: () async {
-          // Update Firestore
+      ),
+    );
+  }
+
+  Widget _info(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        children: [
+          Text(
+            "$label: ",
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 15),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // STATUS ACTION BUTTONS
+  // ---------------------------------------------------------------------------
+  Widget _buildStatusActions(BuildContext context, String orderId,
+      String status, String email, double total, String paymentStatus) {
+    if (status == "pending") {
+      return Row(
+        children: [
+          Expanded(
+            child: _statusButton(
+              label: "Approve",
+              color: Colors.blue,
+              onTap: () async {
+                await FirebaseFirestore.instance
+                    .collection('placedOrders')
+                    .doc(orderId)
+                    .update({"status": "approved"});
+
+                if (email.isNotEmpty) {
+                  await _sendOrderEmail(
+                    toEmail: email,
+                    orderId: orderId,
+                    subject: "Order Approved",
+                    message:
+                    "Your order has been approved and is being prepared.",
+                  );
+                }
+              },
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _statusButton(
+              label: "Reject",
+              color: Colors.red,
+              onTap: () =>
+                  _showRejectDialog(orderId, email, total, paymentStatus),
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (status == "approved") {
+      return _statusButton(
+        label: "On Delivery",
+        color: Colors.blue,
+        onTap: () async {
           await FirebaseFirestore.instance
               .collection('placedOrders')
               .doc(orderId)
-              .update({'status': newStatus});
-
-          // Send email if user has address
-          if (email.isNotEmpty) {
-            await _sendOrderEmail(
-              toEmail: email,
-              orderId: orderId,
-              subject: "Order Update: ${newStatus.toUpperCase()}",
-              message: message,
-            );
-          }
-
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Order updated to $newStatus ✅")),
-          );
+              .update({"status": "on_delivery"});
         },
+      );
+    }
+
+    if (status == "on_delivery") {
+      return _statusButton(
+        label: "Delivered",
+        color: Colors.green,
+        onTap: () async {
+          await FirebaseFirestore.instance
+              .collection('placedOrders')
+              .doc(orderId)
+              .update({"status": "delivered"});
+        },
+      );
+    }
+
+    return const SizedBox();
+  }
+
+  Widget _statusButton({
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return ElevatedButton(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: color,
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        shape:
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        elevation: 4,
       ),
+      onPressed: onTap,
+      child: Text(label,
+          style: const TextStyle(color: Colors.white, fontSize: 14)),
     );
   }
 }

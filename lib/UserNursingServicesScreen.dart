@@ -1,7 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'cart_screen.dart'; // Your screen for booking the selected services
+import 'cart_screen.dart';
 
 class UserNursingServicesScreen extends StatefulWidget {
   final String hospitalId;
@@ -13,7 +13,6 @@ class UserNursingServicesScreen extends StatefulWidget {
       _UserNursingServicesScreenState();
 }
 
-
 class _UserNursingServicesScreenState
     extends State<UserNursingServicesScreen> {
   final CollectionReference servicesRef =
@@ -23,33 +22,28 @@ class _UserNursingServicesScreenState
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text("Available Nursing Services"),
-        backgroundColor: Colors.blueAccent,
+        backgroundColor: isDark ? Colors.grey[900] : Colors.blue[400],
         actions: [
           Stack(
             alignment: Alignment.center,
             children: [
               IconButton(
                 icon: const Icon(Icons.shopping_cart),
-                onPressed: selectedServices.isEmpty
-                    ? null
-                    : () async {
-                  // Navigate to booking screen
+                onPressed: () async {
                   final result = await Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => const CartScreen(
-                      ),
+                      builder: (_) => const CartScreen(),
                     ),
                   );
 
-                  // Clear selections if booking confirmed
                   if (result != null && result is List<Map<String, dynamic>>) {
-                    setState(() {
-                      selectedServices.clear();
-                    });
+                    setState(() => selectedServices.clear());
                   }
                 },
               ),
@@ -84,8 +78,14 @@ class _UserNursingServicesScreenState
       ),
       body: Container(
         padding: const EdgeInsets.all(16),
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
+        decoration: BoxDecoration(
+          gradient: isDark
+              ? const LinearGradient(
+            colors: [Color(0xFF1E1E1E), Color(0xFF121212)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          )
+              : const LinearGradient(
             colors: [Color(0xFFE3F2FD), Color(0xFF90CAF9)],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
@@ -101,8 +101,14 @@ class _UserNursingServicesScreenState
             }
 
             if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-              return const Center(
-                child: Text("No nursing services available."),
+              return Center(
+                child: Text(
+                  "No nursing services available.",
+                  style: TextStyle(
+                    color: isDark ? Colors.white70 : Colors.black87,
+                    fontSize: 16,
+                  ),
+                ),
               );
             }
 
@@ -116,116 +122,134 @@ class _UserNursingServicesScreenState
                 final subServices = List.from(data['subServices'] ?? []);
 
                 return Card(
+                  color: isDark ? Colors.grey[900] : Colors.white,
                   elevation: 3,
                   margin: const EdgeInsets.symmetric(vertical: 8),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: ExpansionTile(
-                    leading:
-                    const Icon(Icons.medical_services, color: Colors.blue),
-                    title: Text(
-                      data['name'] ?? 'Unnamed Service',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
+                  child: Theme(
+                    data: Theme.of(context).copyWith(
+                      dividerColor: Colors.transparent,
+                      splashColor:
+                      isDark ? Colors.blueGrey[800] : Colors.blue[50],
                     ),
-                    subtitle: Text(data['description'] ?? ''),
-                    children: [
-                      if (subServices.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 8),
-                          child: Column(
-                            children: subServices.map((sub) {
-                              final isSelected = selectedServices
-                                  .any((e) => e['id'] == sub['id']);
-                              return ListTile(
-                                leading: const Icon(Icons.arrow_right),
-                                title: Text(sub['name'] ?? ''),
-                                subtitle: Text(
-                                  sub['price'] != null
-                                      ? "Price: ${sub['price']} OMR"
-                                      : "No price set",
-                                ),
+                    child: ExpansionTile(
+                      leading: Icon(
+                        Icons.medical_services,
+                        color: isDark
+                            ? Colors.lightBlueAccent
+                            : Colors.blueAccent,
+                      ),
+                      title: Text(
+                        data['name'] ?? 'Unnamed Service',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                      subtitle: Text(
+                        data['description'] ?? '',
+                        style: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.black54,
+                        ),
+                      ),
+                      children: [
+                        if (subServices.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 8),
+                            child: Column(
+                              children: subServices.map((sub) {
+                                final isSelected = selectedServices
+                                    .any((e) => e['id'] == sub['id']);
+                                return ListTile(
+                                  leading: Icon(
+                                    Icons.arrow_right,
+                                    color: isDark
+                                        ? Colors.lightBlueAccent
+                                        : Colors.blueAccent,
+                                  ),
+                                  title: Text(
+                                    sub['name'] ?? '',
+                                    style: TextStyle(
+                                      color: isDark
+                                          ? Colors.white
+                                          : Colors.black87,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    sub['price'] != null
+                                        ? "Price: ${sub['price']} OMR"
+                                        : "No price set",
+                                    style: TextStyle(
+                                      color: isDark
+                                          ? Colors.white60
+                                          : Colors.black54,
+                                    ),
+                                  ),
                                   trailing: ElevatedButton(
                                     onPressed: () async {
-                                      final userId = FirebaseAuth.instance.currentUser!.uid;
-                                      final ordersRef = FirebaseFirestore.instance.collection('orders');
-                                      final existingOrders = await ordersRef.where("userId", isEqualTo: userId).get();
+                                      final userId = FirebaseAuth
+                                          .instance.currentUser!.uid;
+                                      final ordersRef = FirebaseFirestore
+                                          .instance
+                                          .collection('orders');
+                                      final existingOrders = await ordersRef
+                                          .where("userId", isEqualTo: userId)
+                                          .get();
 
                                       bool canAdd = true;
 
                                       if (existingOrders.docs.isNotEmpty) {
-                                        final firstItem = existingOrders.docs.first.data() as Map<String, dynamic>;
-                                        final existingType = firstItem['providerType'] ?? "";
-                                        final existingHospital = firstItem['hospitalId'] ?? "";
+                                        final firstItem = existingOrders.docs
+                                            .first
+                                            .data() as Map<String, dynamic>;
+                                        final existingType =
+                                            firstItem['providerType'] ?? "";
+                                        final existingHospital =
+                                            firstItem['hospitalId'] ?? "";
 
-                                        // Check if provider type is different
+                                        // Different provider type
                                         if (existingType != "hospital") {
-                                          final confirm = await showDialog<bool>(
-                                            context: context,
-                                            builder: (ctx) => AlertDialog(
-                                              title: const Text("Start a new cart?"),
-                                              content: const Text(
-                                                  "Your cart already contains items from another provider type.\nDo you want to clear it and add this service instead?"),
-                                              actions: [
-                                                TextButton(
-                                                  onPressed: () => Navigator.pop(ctx, false),
-                                                  child: const Text("Cancel"),
-                                                ),
-                                                ElevatedButton(
-                                                  onPressed: () => Navigator.pop(ctx, true),
-                                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
-                                                  child: const Text("Start"),
-                                                ),
-                                              ],
-                                            ),
-                                          );
-                                          if (confirm != true) {
-                                            canAdd = false;
-                                          } else {
-                                            for (var doc in existingOrders.docs) await doc.reference.delete();
+                                          canAdd = await _confirmClearCart(
+                                              context,
+                                              "Your cart contains items from another provider type.");
+                                          if (canAdd) {
+                                            for (var doc
+                                            in existingOrders.docs) {
+                                              await doc.reference.delete();
+                                            }
                                           }
                                         }
-
-                                        // Check if the existing hospital is different
-                                        else if (existingHospital != widget.hospitalId) {
-                                          final confirm = await showDialog<bool>(
-                                            context: context,
-                                            builder: (ctx) => AlertDialog(
-                                              title: const Text("Start a new cart?"),
-                                              content: const Text(
-                                                  "Your cart already contains services from another hospital.\nDo you want to clear it and add this service instead?"),
-                                              actions: [
-                                                TextButton(
-                                                  onPressed: () => Navigator.pop(ctx, false),
-                                                  child: const Text("Cancel"),
-                                                ),
-                                                ElevatedButton(
-                                                  onPressed: () => Navigator.pop(ctx, true),
-                                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
-                                                  child: const Text("Start"),
-                                                ),
-                                              ],
-                                            ),
-                                          );
-                                          if (confirm != true) {
-                                            canAdd = false;
-                                          } else {
-                                            for (var doc in existingOrders.docs) await doc.reference.delete();
+                                        // Different hospital
+                                        else if (existingHospital !=
+                                            widget.hospitalId) {
+                                          canAdd = await _confirmClearCart(
+                                              context,
+                                              "Your cart contains services from another hospital.");
+                                          if (canAdd) {
+                                            for (var doc
+                                            in existingOrders.docs) {
+                                              await doc.reference.delete();
+                                            }
                                           }
                                         }
                                       }
 
                                       if (!canAdd) return;
 
-                                      final isSelected = selectedServices.any((e) => e['id'] == sub['id']);
+                                      final existing = await ordersRef
+                                          .where('userId', isEqualTo: userId)
+                                          .where('serviceId',
+                                          isEqualTo: sub['id'])
+                                          .where('providerType',
+                                          isEqualTo: 'hospital')
+                                          .get();
 
-                                      if (!isSelected) {
-                                        // Add to Firestore
-                                        await ordersRef.add({
+                                      if (existing.docs.isEmpty) {
+                                        final docRef = await ordersRef.add({
                                           'userId': userId,
                                           'providerType': "hospital",
                                           'hospitalId': widget.hospitalId,
@@ -235,7 +259,8 @@ class _UserNursingServicesScreenState
                                           'price': sub['price'],
                                           'quantity': 1,
                                           'notes': "",
-                                          'timestamp': FieldValue.serverTimestamp(),
+                                          'timestamp':
+                                          FieldValue.serverTimestamp(),
                                         });
 
                                         setState(() {
@@ -244,47 +269,48 @@ class _UserNursingServicesScreenState
                                             'name': sub['name'],
                                             'parentService': data['name'],
                                             'price': sub['price'],
+                                            'cartId': docRef.id,
                                           });
                                         });
 
-                                        ScaffoldMessenger.of(context).showSnackBar(
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
                                           SnackBar(
-                                            content: Text("${sub['name']} added to your cart"),
+                                            content: Text(
+                                                "${sub['name']} added to your cart"),
                                             backgroundColor: Colors.green,
                                           ),
                                         );
                                       } else {
-                                        // Remove from Firestore & local selection
-                                        final snapshot = await ordersRef
-                                            .where('userId', isEqualTo: userId)
-                                            .where('serviceId', isEqualTo: sub['id'])
-                                            .get();
-
-                                        for (var doc in snapshot.docs) await doc.reference.delete();
-
-                                        setState(() {
-                                          selectedServices.removeWhere((e) => e['id'] == sub['id']);
-                                        });
-
-                                        ScaffoldMessenger.of(context).showSnackBar(
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
                                           SnackBar(
-                                            content: Text("${sub['name']} removed from your cart"),
-                                            backgroundColor: Colors.redAccent,
+                                            content: Text(
+                                                "${sub['name']} is already in your cart"),
+                                            backgroundColor: Colors.orange,
                                           ),
                                         );
                                       }
                                     },
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: selectedServices.any((e) => e['id'] == sub['id']) ? Colors.green : Colors.teal,
+                                      backgroundColor: isSelected
+                                          ? Colors.green
+                                          : (isDark
+                                          ? Colors.teal
+                                          : Colors.blueAccent),
                                     ),
-                                    child: Text(selectedServices.any((e) => e['id'] == sub['id']) ? "Selected" : "Select"),
+                                    child: Text(
+                                      isSelected ? "Selected" : "Select",
+                                      style: const TextStyle(
+                                          color: Colors.white),
+                                    ),
                                   ),
-
-                              );
-                            }).toList(),
+                                );
+                              }).toList(),
+                            ),
                           ),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
                 );
               },
@@ -293,5 +319,27 @@ class _UserNursingServicesScreenState
         ),
       ),
     );
+  }
+
+  Future<bool> _confirmClearCart(BuildContext context, String message) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Start a new cart?"),
+        content: Text("$message\nDo you want to clear it and add this service instead?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
+            child: const Text("Start"),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
   }
 }

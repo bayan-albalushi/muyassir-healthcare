@@ -4,6 +4,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
+import 'dart:typed_data';
+import 'package:image_editor_plus/image_editor_plus.dart';
 
 class ManageMedicinesScreen extends StatefulWidget {
   final String pharmacyId;
@@ -23,8 +25,11 @@ class _ManageMedicinesScreenState extends State<ManageMedicinesScreen> {
   // Controllers for form inputs
   final _nameController = TextEditingController();
   final _priceController = TextEditingController();
+  final _unitPriceController = TextEditingController(); // ✅ NEW (unit price)
   final _stockController = TextEditingController();
   final _descriptionController = TextEditingController();
+
+  bool sellByUnit = false; // ✅ NEW
 
   // Reference to the Firestore collection
   final CollectionReference medicines =
@@ -41,8 +46,7 @@ class _ManageMedicinesScreenState extends State<ManageMedicinesScreen> {
   // Upload a single image to Cloudinary
   Future<Map<String, String>> _uploadImageToCloudinary(File image) async {
     try {
-      final url =
-      Uri.parse("https://api.cloudinary.com/v1_1/dkiqssdwj/image/upload");
+      final url = Uri.parse("https://api.cloudinary.com/v1_1/dkiqssdwj/image/upload");
       final request = http.MultipartRequest('POST', url)
         ..fields['upload_preset'] = 'first_time_cloudinary'
         ..files.add(await http.MultipartFile.fromPath('file', image.path));
@@ -76,12 +80,41 @@ class _ManageMedicinesScreenState extends State<ManageMedicinesScreen> {
   // Let the user pick multiple images from gallery
   Future<void> _pickImages(String key) async {
     final picked = await _picker.pickMultiImage();
+
     if (picked.isNotEmpty) {
+      List<File> editedImages = [];
+
+      for (var img in picked) {
+        // Read the image bytes first
+        Uint8List imgBytes = await img.readAsBytes();
+
+        // Open editor
+        final edited = await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ImageEditor(
+              image: imgBytes, // ✅ send bytes to editor
+            ),
+          ),
+        );
+
+        if (edited != null && edited is Uint8List) {
+          // Save edited result to temp file
+          final tempPath = "${img.path}_edited.png";
+          final editedFile = await File(tempPath).writeAsBytes(edited);
+          editedImages.add(editedFile);
+        } else {
+          // If user cancels editing, store original image
+          editedImages.add(File(img.path));
+        }
+      }
+
       setState(() {
-        _pickedImagesList[key] = picked.map((e) => File(e.path)).toList();
+        _pickedImagesList[key] = editedImages;
       });
     }
   }
+
 
   // Show preview of selected images (from file or network)
   Widget _buildImagePreview(dynamic items, {bool isNetwork = false}) {
@@ -104,11 +137,9 @@ class _ManageMedicinesScreenState extends State<ManageMedicinesScreen> {
   Future<String?> _validateInputs(String name, String price, String stock,
       {String? excludeId}) async {
     if (name.trim().isEmpty) return "Medicine name is required";
-    // Ensure the name includes at least one letter (letters are mandatory)
     if (!RegExp(r'[a-zA-Z]').hasMatch(name.trim())) {
       return "Medicine name must include at least one letter";
     }
-
 
     if (price.trim().isEmpty || double.tryParse(price) == null) {
       return "Valid price is required";
@@ -123,7 +154,6 @@ class _ManageMedicinesScreenState extends State<ManageMedicinesScreen> {
       return "Stock must be at least 1";
     }
 
-    // Check if the same medicine name already exists for this pharmacy
     final normalizedName = name.replaceAll(RegExp(r"\s+"), "").toLowerCase();
     final snapshot = await medicines
         .where('pharmacyId', isEqualTo: widget.pharmacyId)
@@ -152,10 +182,11 @@ class _ManageMedicinesScreenState extends State<ManageMedicinesScreen> {
   }) {
     return {
       'name': _nameController.text.trim(),
-      'normalizedName': _nameController.text
-          .replaceAll(RegExp(r"\s+"), "")
-          .toLowerCase(),
+      'normalizedName': _nameController.text.replaceAll(RegExp(r"\s+"), "").toLowerCase(),
       'price': double.tryParse(_priceController.text) ?? 0,
+      'unitPrice': sellByUnit ? double.tryParse(_unitPriceController.text) ?? 0 : null, // ✅ NEW
+      'sellByUnit': sellByUnit, // ✅ NEW
+
       'stock': int.tryParse(_stockController.text) ?? 0,
       'description': _descriptionController.text,
       'images': urls,
@@ -165,7 +196,6 @@ class _ManageMedicinesScreenState extends State<ManageMedicinesScreen> {
       'pharmacyId': widget.pharmacyId,
       'pharmacyName': widget.pharmacyName,
       'isDeleted': false,
-
     };
   }
 
@@ -180,10 +210,25 @@ class _ManageMedicinesScreenState extends State<ManageMedicinesScreen> {
         decoration: const InputDecoration(labelText: "Medicine Name"),
         readOnly: isUpdate, // The name can't be changed on update
       ),
-      _buildTextField(_priceController, "Price",
-          keyboard: TextInputType.number),
-      _buildTextField(_stockController, "Stock",
-          keyboard: TextInputType.number),
+
+      _buildTextField(_priceController, "Original Price (Box)", keyboard: TextInputType.number),
+
+      // ✅ NEW: checkbox to enable unit selling
+      CheckboxListTile(
+        title: const Text("Enable selling per unit"),
+        value: sellByUnit,
+        onChanged: (val) {
+          setDialogState(() {
+            sellByUnit = val ?? false;
+          });
+        },
+      ),
+
+      // ✅ NEW: unit price only shown if checkbox is enabled
+      if (sellByUnit)
+        _buildTextField(_unitPriceController, "Unit Price", keyboard: TextInputType.number),
+
+      _buildTextField(_stockController, "Stock", keyboard: TextInputType.number),
       _buildTextField(_descriptionController, "Description"),
 
       Row(
@@ -204,7 +249,6 @@ class _ManageMedicinesScreenState extends State<ManageMedicinesScreen> {
         ],
       ),
 
-      // Show prescription type only if approval is required
       if (_requiresApprovalMap[key] == true) ...[
         DropdownButtonFormField<String>(
           value: (_prescriptionTypeMap[key] == "none" ||
@@ -222,18 +266,14 @@ class _ManageMedicinesScreenState extends State<ManageMedicinesScreen> {
           onChanged: (val) {
             setDialogState(() {
               _prescriptionTypeMap[key] = val ?? "";
-              if (val == "byQuantity" && _prescriptionLimitMap[key] == null) {
-                _prescriptionLimitMap[key] = 0;
-              }
             });
           },
         ),
 
-        // If prescription type is "byQuantity", show limit input
         if (_prescriptionTypeMap[key] == "byQuantity")
           TextField(
-            decoration: const InputDecoration(
-                labelText: "Prescription Limit (Required)"),
+            decoration:
+            const InputDecoration(labelText: "Prescription Limit (Required)"),
             keyboardType: TextInputType.number,
             onChanged: (val) {
               _prescriptionLimitMap[key] = int.tryParse(val) ?? 0;
@@ -250,7 +290,6 @@ class _ManageMedicinesScreenState extends State<ManageMedicinesScreen> {
         child: const Text("Pick Images"),
       ),
 
-      // Display selected images or existing ones
       if (_pickedImagesList[key]?.isNotEmpty == true)
         _buildImagePreview(_pickedImagesList[key]!)
       else if (data != null && (data['images'] ?? []).isNotEmpty)
@@ -262,12 +301,14 @@ class _ManageMedicinesScreenState extends State<ManageMedicinesScreen> {
   void _showAddDialog() {
     _nameController.clear();
     _priceController.clear();
+    _unitPriceController.clear(); // ✅ NEW
     _stockController.clear();
     _descriptionController.clear();
     _pickedImagesList['new'] = [];
     _requiresApprovalMap['new'] = false;
     _prescriptionTypeMap['new'] = "";
     _prescriptionLimitMap['new'] = 0;
+    sellByUnit = false; // ✅ RESET
 
     showDialog(
       context: context,
@@ -298,34 +339,36 @@ class _ManageMedicinesScreenState extends State<ManageMedicinesScreen> {
                   return;
                 }
 
-                // Check prescription details if approval is required
-                // Make sure a prescription type is selected when approval is required
-                if (_requiresApprovalMap['new'] == true &&
-                    (_prescriptionTypeMap['new'] == null ||
-                        _prescriptionTypeMap['new']!.isEmpty)) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                      content: Text("Please select a Prescription Type")));
+                if (sellByUnit &&
+                    (_unitPriceController.text.isEmpty ||
+                        double.tryParse(_unitPriceController.text) == null)) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Enter a valid unit price")));
                   return;
                 }
 
-// Ensure prescription limit if required
+                if (_requiresApprovalMap['new'] == true &&
+                    (_prescriptionTypeMap['new'] == null ||
+                        _prescriptionTypeMap['new']!.isEmpty)) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Please select a Prescription Type")));
+                  return;
+                }
+
                 if (_requiresApprovalMap['new'] == true &&
                     _prescriptionTypeMap['new'] == "byQuantity" &&
                     (_prescriptionLimitMap['new'] == null ||
                         _prescriptionLimitMap['new'] == 0)) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                      content: Text("Please enter a valid prescription limit")));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Please enter a valid prescription limit")));
                   return;
                 }
 
-
-                // Upload selected images to Cloudinary
                 List<String> urls = [];
                 if (_pickedImagesList['new']!.isNotEmpty) {
                   urls = await _uploadMultipleImages(_pickedImagesList['new']!);
                 }
 
-                // Add new document to Firestore
                 await medicines.add(_buildMedicineData(
                   urls: urls,
                   requiresApproval: _requiresApprovalMap['new']!,
@@ -346,6 +389,9 @@ class _ManageMedicinesScreenState extends State<ManageMedicinesScreen> {
   void _updateMedicine(String id, Map<String, dynamic> data) {
     _nameController.text = data['name'];
     _priceController.text = (data['price'] as num).toString();
+    _unitPriceController.text = data['unitPrice']?.toString() ?? ""; // ✅ NEW
+    sellByUnit = data['sellByUnit'] ?? false; // ✅ NEW
+
     _stockController.text = (data['stock'] as num).toString();
     _descriptionController.text = data['description'] ?? '';
     _pickedImagesList[id] = [];
@@ -371,29 +417,33 @@ class _ManageMedicinesScreenState extends State<ManageMedicinesScreen> {
             ElevatedButton(
               child: const Text("Update"),
               onPressed: () async {
-                // Validate updated price and stock
                 final price = _priceController.text;
                 final stock = _stockController.text;
 
                 if (price.trim().isEmpty ||
                     double.tryParse(price) == null ||
                     double.tryParse(price)! <= 0) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                      content:
-                      Text("Please enter a valid price greater than 0")));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Please enter a valid price greater than 0")));
+                  return;
+                }
+
+                if (sellByUnit &&
+                    (_unitPriceController.text.isEmpty ||
+                        double.tryParse(_unitPriceController.text) == null)) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Enter a valid unit price")));
                   return;
                 }
 
                 if (stock.trim().isEmpty ||
                     int.tryParse(stock) == null ||
                     int.tryParse(stock)! < 1) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                      content:
-                      Text("Please enter a valid stock (at least 1)")));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Please enter a valid stock (at least 1)")));
                   return;
                 }
 
-                // Make sure a prescription type is selected when approval is required
                 if (_requiresApprovalMap[id] == true &&
                     (_prescriptionTypeMap[id] == null ||
                         _prescriptionTypeMap[id]!.isEmpty)) {
@@ -402,7 +452,6 @@ class _ManageMedicinesScreenState extends State<ManageMedicinesScreen> {
                   return;
                 }
 
-// Check prescription limit if required
                 if (_requiresApprovalMap[id] == true &&
                     _prescriptionTypeMap[id] == "byQuantity" &&
                     (_prescriptionLimitMap[id] == null ||
@@ -412,14 +461,11 @@ class _ManageMedicinesScreenState extends State<ManageMedicinesScreen> {
                   return;
                 }
 
-
-                // Upload new images if selected
                 List<String> urls = List<String>.from(data['images'] ?? []);
                 if (_pickedImagesList[id]!.isNotEmpty) {
                   urls = await _uploadMultipleImages(_pickedImagesList[id]!);
                 }
 
-                // Update Firestore document
                 await medicines.doc(id).update(_buildMedicineData(
                   urls: urls,
                   requiresApproval: _requiresApprovalMap[id]!,
@@ -445,8 +491,6 @@ class _ManageMedicinesScreenState extends State<ManageMedicinesScreen> {
     );
   }
 
-
-  // Helper function to build a text field
   Widget _buildTextField(TextEditingController c, String label,
       {TextInputType keyboard = TextInputType.text}) {
     return TextField(
@@ -465,8 +509,7 @@ class _ManageMedicinesScreenState extends State<ManageMedicinesScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text("Medicines - ${widget.pharmacyName}"),
-        backgroundColor:
-        isDark ? Colors.grey.shade900 : Colors.lightBlueAccent,
+        backgroundColor: isDark ? Colors.grey.shade900 : Colors.lightBlueAccent,
         elevation: 4,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(bottom: Radius.circular(16)),
@@ -481,19 +524,16 @@ class _ManageMedicinesScreenState extends State<ManageMedicinesScreen> {
       body: RefreshIndicator(
         onRefresh: () async => setState(() {}),
         child: StreamBuilder<QuerySnapshot>(
-          stream: medicines
-              .where('pharmacyId', isEqualTo: widget.pharmacyId)
-              .snapshots(),
+          stream:
+          medicines.where('pharmacyId', isEqualTo: widget.pharmacyId).snapshots(),
           builder: (context, snapshot) {
             if (!snapshot.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
 
-            // Filter out deleted medicines (and keep old ones without 'isDeleted' field)
             final allDocs = snapshot.data!.docs;
             final docs = allDocs.where((doc) {
               final data = doc.data() as Map<String, dynamic>;
-              // Show if medicine is not deleted or doesn't have the field at all
               return data['isDeleted'] != true;
             }).toList();
 
@@ -509,10 +549,8 @@ class _ManageMedicinesScreenState extends State<ManageMedicinesScreen> {
                 final data = medicine.data() as Map<String, dynamic>;
                 final images = List<String>.from(data['images'] ?? []);
 
-
                 return Card(
-                  margin:
-                  const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+                  margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
                   color: cardColor,
                   child: ListTile(
                     leading: images.isNotEmpty
@@ -530,8 +568,17 @@ class _ManageMedicinesScreenState extends State<ManageMedicinesScreen> {
                     subtitle: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          /// ✅ Show box price & unit price if available
                           Text(
-                              "Price: ${data['price']} | Stock: ${data['stock']}",
+                            data['sellByUnit'] == true
+                                ? "Box: ${data['price']} OMR | Unit: ${data['unitPrice']} OMR"
+                                : "Price: ${data['price']} OMR",
+                            style: TextStyle(
+                                color: isDark
+                                    ? Colors.white70
+                                    : Colors.blueGrey[700]),
+                          ),
+                          Text("Stock: ${data['stock']}",
                               style: TextStyle(
                                   color: isDark
                                       ? Colors.white70

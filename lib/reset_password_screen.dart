@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'encrypt_helper.dart';
+import 'localization.dart';
 
 class ResetPasswordScreen extends StatefulWidget {
   const ResetPasswordScreen({super.key});
@@ -9,6 +10,7 @@ class ResetPasswordScreen extends StatefulWidget {
   State<ResetPasswordScreen> createState() => _ResetPasswordScreenState();
 }
 class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
+  bool isSuccess = false;
   final _formKey = GlobalKey<FormState>();
   final oldPasswordController = TextEditingController();
   final passwordController = TextEditingController();
@@ -21,11 +23,13 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   bool showConfirm = false;
 
   Future<void> updatePassword() async {
+    final t = AppLocalization.of(context)!;
+
     if (!_formKey.currentState!.validate()) return;
     final oldPassword = oldPasswordController.text.trim();
     final newPassword = passwordController.text.trim();
     if (oldPassword == newPassword) {
-      setState(() => message = "New password cannot be the same as the old password.");
+      setState(() => message = t.translate("New password cannot be the same as the old password."));
       return;
     }
 
@@ -40,7 +44,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
       final currentUser = FirebaseAuth.instance.currentUser;
       if (currentUser == null) {
         setState(() {
-          message = "User not found. Please log in again.";
+          message = t.translate("User not found. Please log in again.");
           isLoading = false;
         });
         return;
@@ -52,7 +56,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
           .get();
       if (!userDoc.exists) {
         setState(() {
-          message = "User data not found.";
+          message = t.translate("User data not found.");
           isLoading = false;
         });
         return;
@@ -63,9 +67,10 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
       final decrypted = decryptText(encrypted);
       if (decrypted != oldPassword) {
         setState(() {
-          message = "Incorrect old password.";
-          isLoading = false;
+          message = t.translate("Incorrect old password."); // أو أي رسالة خطأ
+          isSuccess = false;
         });
+
         return;
       }
 //in firestore
@@ -80,8 +85,8 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Password updated successfully.'),
+        SnackBar(
+          content: Text(t.translate("Password updated successfully.")),
           backgroundColor: Colors.green,
           duration: Duration(seconds: 2),
         ),
@@ -98,15 +103,19 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
 
 
   String? passwordValidator(String? value) {
-    if (value == null || value.length < 6) return 'Password must be at least 6 characters';
-    if (!RegExp(r'[A-Z]').hasMatch(value)) return 'Must contain at least one uppercase letter';
-    if (!RegExp(r'[!@#$%^&*(),.?":{}|<>]').hasMatch(value)) return 'Must contain at least one special character';
+    final t = AppLocalization.of(context)!;
+
+    if (value == null || value.length < 6) return t.translate("Password must be at least 6 characters");
+    if (!RegExp(r'[A-Z]').hasMatch(value)) return t.translate("Must contain at least one uppercase letter");
+    if (!RegExp(r'[!@#$%^&*(),.?":{}|<>]').hasMatch(value)) return t.translate("Must contain at least one special character");
     return null;
   }
 
   @override
 
   Widget build(BuildContext context) {
+    final t = AppLocalization.of(context)!;
+
 
     return Scaffold(
 
@@ -114,7 +123,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
 
         backgroundColor: Colors.blueAccent,
 
-        title: const Text('Reset Password'),
+        title: Text(t.translate("Reset Password")),
 
         leading: IconButton(
 
@@ -174,7 +183,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
 
                   children: [
 
-                    const Text("Reset Password", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                    Text(t.translate("Reset Password"), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
 
                     const SizedBox(height: 20),
 
@@ -188,7 +197,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
 
                       decoration: InputDecoration(
 
-                        labelText: 'Old Password',
+                        labelText: t.translate("Old Password"),
 
                         prefixIcon: const Icon(Icons.lock_open),
 
@@ -204,7 +213,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
 
                       ),
 
-                      validator: (v) => v == null || v.isEmpty ? 'Enter old password' : null,
+                      validator: (v) => v == null || v.isEmpty ? t.translate("Enter old password") : null,
 
                     ),
 
@@ -220,7 +229,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
 
                       decoration: InputDecoration(
 
-                        labelText: 'New Password',
+                        labelText: t.translate("New Password"),
 
                         prefixIcon: const Icon(Icons.lock),
 
@@ -252,7 +261,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
 
                       decoration: InputDecoration(
 
-                        labelText: 'Confirm Password',
+                        labelText: t.translate("Confirm Password"),
 
                         prefixIcon: const Icon(Icons.lock_outline),
 
@@ -268,27 +277,21 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
 
                       ),
 
-                      validator: (v) => v != passwordController.text ? 'Passwords do not match' : null,
+                      validator: (v) => v != passwordController.text ? t.translate("Passwords do not match") : null,
 
                     ),
 
                     const SizedBox(height: 20),
 
                     if (message != null)
-
                       Text(
-
                         message!,
-
                         style: TextStyle(
-
-                          color: message!.contains('successfully') ? Colors.green : Colors.red,
-
+                          color: isSuccess ? Colors.green : Colors.red,
                         ),
-
                         textAlign: TextAlign.center,
-
                       ),
+
 
                     const SizedBox(height: 16),
 
@@ -316,7 +319,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
 
                             ? const CircularProgressIndicator(color: Colors.white)
 
-                            : const Text('Update Password', style: TextStyle(color: Colors.white)),
+                            : Text(t.translate("Update Password"), style: const TextStyle(color: Colors.white)),
 
                       ),
 

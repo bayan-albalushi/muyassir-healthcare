@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'localization.dart'; // مهم جداً لإضافة الترجمة
+import 'package:translator/translator.dart';
 
 class LabTestListProvider extends StatefulWidget {
   final String labId;
 
   const LabTestListProvider({super.key, required this.labId});
+
 
   @override
   _LabTestListProviderState createState() => _LabTestListProviderState();
@@ -14,16 +17,39 @@ class _LabTestListProviderState extends State<LabTestListProvider> {
   final CollectionReference testsCollection =
   FirebaseFirestore.instance.collection('lab_tests');
 
+  String _formatNumber(double value, String lang) {
+    if (lang == 'ar') {
+      const arabicDigits = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
+      final formatted = value.toStringAsFixed(3);
+      return formatted.split('').map((c) {
+        if (RegExp(r'\d').hasMatch(c)) {
+          return arabicDigits[int.parse(c)];
+        } else {
+          return c;
+        }
+      }).join();
+    }
+    return value.toStringAsFixed(3);
+  }
+
+
+
   @override
   Widget build(BuildContext context) {
+    final t = AppLocalization.of(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final backgroundColor = isDark ? const Color(0xFF121212) : Colors.white;
+
     return Scaffold(
+      backgroundColor: backgroundColor,
       appBar: AppBar(
-        title: const Text('Manage Lab Tests'),
-        backgroundColor: Colors.blueAccent,
+        title: Text(t.translate('Manage Lab Tests')),
+        backgroundColor: isDark ? Colors.teal.shade700 : Colors.blueAccent,
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showAddEditTestDialog(context),
-        backgroundColor: Colors.blueAccent,
+        backgroundColor:
+        isDark ? Colors.tealAccent.shade700 : Colors.blueAccent,
         child: const Icon(Icons.add),
       ),
       body: StreamBuilder<QuerySnapshot>(
@@ -32,11 +58,24 @@ class _LabTestListProviderState extends State<LabTestListProvider> {
             .orderBy('createdAt', descending: true)
             .snapshots(),
         builder: (context, snapshot) {
-          if (snapshot.hasError) return Center(child: Text('Error: ${snapshot.error}'));
-          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+          if (snapshot.hasError) {
+            return Center(
+                child: Text('${t.translate('Error')}: ${snapshot.error}',
+                    style:
+                    TextStyle(color: isDark ? Colors.white : Colors.black)));
+          }
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
 
           final docs = snapshot.data!.docs;
-          if (docs.isEmpty) return const Center(child: Text('No tests added yet.', style: TextStyle(fontSize: 24)));
+          if (docs.isEmpty) {
+            return Center(
+                child: Text(t.translate('No tests added yet.'),
+                    style: TextStyle(
+                        fontSize: 20,
+                        color: isDark ? Colors.white70 : Colors.black54)));
+          }
 
           return ListView.builder(
             padding: const EdgeInsets.all(16),
@@ -45,7 +84,7 @@ class _LabTestListProviderState extends State<LabTestListProvider> {
               final doc = docs[index];
               final test = doc.data() as Map<String, dynamic>;
               test['id'] = doc.id;
-              return _buildTestCard(test);
+              return _buildTestCard(test, isDark, t);
             },
           );
         },
@@ -53,88 +92,135 @@ class _LabTestListProviderState extends State<LabTestListProvider> {
     );
   }
 
-  Widget _buildTestCard(Map<String, dynamic> test) {
-    List<String> instructions = List<String>.from(test['instructions'] ?? []);
+  Widget _buildTestCard(Map<String, dynamic> test, bool isDark, AppLocalization t) {
+    final lang = Localizations.localeOf(context).languageCode;
+    final currentLang = Localizations.localeOf(context).languageCode;
+    final translator = GoogleTranslator();
 
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.green[50],
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2))],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                  child: Text(test['name'] ?? '',
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
-              Row(
-                children: [
-                  IconButton(
-                      icon: const Icon(Icons.edit, color: Colors.blueAccent),
-                      onPressed: () => _showAddEditTestDialog(context, test: test)),
-                  IconButton(
-                      icon: const Icon(Icons.delete, color: Colors.red),
-                      onPressed: () => _deleteTest(test['id'])),
-                ],
+    return FutureBuilder<Map<String, dynamic>>(
+      future: _translateTestData(test, currentLang, translator),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        final translated = snapshot.data!;
+        List<String> instructions = List<String>.from(translated['instructions'] ?? []);
+
+        final cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.green[50];
+        final textColor = isDark ? Colors.white : Colors.black87;
+        final instructionBg = isDark ? Colors.blueGrey[800] : Colors.blue[50];
+
+        return Container(
+          margin: const EdgeInsets.symmetric(vertical: 8),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: cardColor,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: isDark ? Colors.black54 : Colors.grey.withOpacity(0.3),
+                blurRadius: 5,
+                offset: const Offset(0, 3),
               ),
             ],
           ),
-
-
-          if ((test['description'] ?? '').isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Text(test['description'] ?? '',
-                  style: const TextStyle(fontSize: 14, color: Colors.black87)),
-            ),
-          if (instructions.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            const Text('Instructions:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-            const SizedBox(height: 4),
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: Colors.blue[50], borderRadius: BorderRadius.circular(8)),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: instructions
-                    .map((i) => Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [const Text("• "), Expanded(child: Text(i))],
-
-
-
-
-                )
-                )
-                    .toList(),
-
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      translated['name'] ?? '',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: textColor,
+                      ),
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      IconButton(
+                        icon: Icon(Icons.edit,
+                            color: isDark ? Colors.tealAccent : Colors.blueAccent),
+                        onPressed: () => _showAddEditTestDialog(context, test: test),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete, color: Colors.red),
+                        onPressed: () => _deleteTest(test['id']),
+                      ),
+                    ],
+                  ),
+                ],
               ),
+              if ((translated['description'] ?? '').isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Text(
+                    translated['description'] ?? '',
+                    style: TextStyle(fontSize: 14, color: textColor.withOpacity(0.9)),
+                  ),
+                ),
+              if (instructions.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(t.translate('Instructions'),
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: textColor)),
+                const SizedBox(height: 4),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                      color: instructionBg, borderRadius: BorderRadius.circular(8)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: instructions
+                        .map((i) => Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text("• ",
+                            style: TextStyle(
+                                color: isDark
+                                    ? Colors.white70
+                                    : Colors.black87)),
+                        Expanded(child: Text(i, style: TextStyle(color: textColor))),
+                      ],
+                    ))
+                        .toList(),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 6),
 
-            ),
-          ],
-          // ✅ أضف السعر هنا
-          Text(
-            'Price: ${test['price']?.toStringAsFixed(3) ?? '0.000'} OMR',
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              Text(
+                '${t.translate('Price')}: ${_formatNumber(translated['price'] ?? 0, lang)} ${t.translate('OMR')}',
+                style: TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.bold, color: textColor),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
+
 
   Future<void> _deleteTest(String testId) async {
     await testsCollection.doc(testId).delete();
   }
 
   void _showAddEditTestDialog(BuildContext context, {Map<String, dynamic>? test}) {
+    final t = AppLocalization.of(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     final nameController = TextEditingController(text: test?['name'] ?? '');
-    final descController = TextEditingController(text: test?['description'] ?? '');
-    final priceController = TextEditingController(text: test != null ? test['price'].toString() : '');
+    final descController =
+    TextEditingController(text: test?['description'] ?? '');
+    final priceController =
+    TextEditingController(text: test != null ? test['price'].toString() : '');
     List<String> instructions = List<String>.from(test?['instructions'] ?? []);
     final instrController = TextEditingController();
 
@@ -142,34 +228,102 @@ class _LabTestListProviderState extends State<LabTestListProvider> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
-          title: Text(test == null ? "Add Test" : "Edit Test"),
+          backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          title: Text(
+            test == null
+                ? t.translate('Add Test')
+                : t.translate('Edit Test'),
+            style: TextStyle(color: isDark ? Colors.white : Colors.black),
+          ),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 TextField(
                   controller: nameController,
-                  decoration: const InputDecoration(labelText: 'Name'),
-                  readOnly: test != null, // إذا كان تعديل، يصبح الاسم غير قابل للتغيير
+                  decoration: InputDecoration(
+                    labelText: t.translate('Name'),
+                    labelStyle: TextStyle(
+                        color: isDark ? Colors.white70 : Colors.black54),
+                    enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(
+                            color:
+                            isDark ? Colors.white24 : Colors.black26)),
+                  ),
+                  style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                  readOnly: test != null,
                 ),
-
-                TextField(controller: descController, decoration: const InputDecoration(labelText: 'Description')),
-                TextField(controller: priceController, decoration: const InputDecoration(labelText: 'Price'), keyboardType: TextInputType.number),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: descController,
+                  decoration: InputDecoration(
+                    labelText: t.translate('Description'),
+                    labelStyle: TextStyle(
+                        color: isDark ? Colors.white70 : Colors.black54),
+                    enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(
+                            color:
+                            isDark ? Colors.white24 : Colors.black26)),
+                  ),
+                  style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: priceController,
+                  decoration: InputDecoration(
+                    labelText: t.translate('Price'),
+                    labelStyle: TextStyle(
+                        color: isDark ? Colors.white70 : Colors.black54),
+                    enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(
+                            color:
+                            isDark ? Colors.white24 : Colors.black26)),
+                  ),
+                  keyboardType: TextInputType.number,
+                  style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                ),
                 const SizedBox(height: 12),
-                const Align(alignment: Alignment.centerLeft, child: Text('Instructions', style: TextStyle(fontWeight: FontWeight.bold))),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(t.translate('Instructions'),
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : Colors.black)),
+                ),
+                const SizedBox(height: 4),
                 ...instructions.map((i) => ListTile(
-                  title: Text(i),
+                  title: Text(i,
+                      style: TextStyle(
+                          color:
+                          isDark ? Colors.white : Colors.black)),
                   trailing: IconButton(
                       icon: const Icon(Icons.delete, color: Colors.red),
                       onPressed: () {
-                        setState(() {
-                          instructions.remove(i);
-                        });
+                        setState(() => instructions.remove(i));
                       }),
+
                 )),
+
+
                 Row(
                   children: [
-                    Expanded(child: TextField(controller: instrController, decoration: const InputDecoration(labelText: 'Add Instruction'))),
+                    Expanded(
+                      child: TextField(
+                        controller: instrController,
+                        decoration: InputDecoration(
+                          labelText: t.translate('Add Instruction'),
+                          labelStyle: TextStyle(
+                              color: isDark ? Colors.white70 : Colors.black54),
+                          enabledBorder: OutlineInputBorder(
+                              borderSide: BorderSide(
+                                  color: isDark
+                                      ? Colors.white24
+                                      : Colors.black26)),
+                        ),
+                        style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black),
+                      ),
+                    ),
                     IconButton(
                         icon: const Icon(Icons.add, color: Colors.green),
                         onPressed: () {
@@ -186,58 +340,59 @@ class _LabTestListProviderState extends State<LabTestListProvider> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(t.translate('Cancel'),
+                  style: TextStyle(
+                      color: isDark ? Colors.white70 : Colors.black54)),
+            ),
             ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor:
+                isDark ? Colors.tealAccent.shade700 : Colors.blueAccent,
+              ),
               onPressed: () async {
                 final name = nameController.text.trim();
                 final desc = descController.text.trim();
-                final price = double.tryParse(priceController.text.trim()) ?? -1;
+                final price =
+                    double.tryParse(priceController.text.trim()) ?? -1;
 
-
-                // ✅ التحقق من الحقول
-                if (name.isEmpty || desc.isEmpty || priceController.text.isEmpty) {
+                if (name.isEmpty ||
+                    desc.isEmpty ||
+                    priceController.text.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Please fill all fields.')),
-                  );
+                      SnackBar(content: Text(t.translate('Please fill all fields.'))));
                   return;
                 }
-                // تحقق من الاسم يحتوي أرقام
+
                 if (RegExp(r'\d').hasMatch(name)) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("⚠️ Name cannot contain numbers")),
-                  );
+                      SnackBar(content: Text(t.translate('⚠️ Name cannot contain numbers'))));
                   return;
                 }
 
-
-
-
-                // السعر أكبر من صفر
                 if (price <= 0) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Price must be greater than 0.')),
-                  );
+                      SnackBar(content: Text(t.translate('Price must be greater than 0.'))));
                   return;
                 }
 
-                // تحقق من الاسم المكرر (case insensitive)
-                final snapshot = await testsCollection
+                final query = await testsCollection
                     .where('labId', isEqualTo: widget.labId)
                     .get();
-                // تحقق من الاسم المكرر مع تجاهل المسافات والحروف الكبيرة/الصغيرة
-                final query = await testsCollection.where('labId', isEqualTo: widget.labId).get();
                 final normalizedInput = name.toLowerCase().replaceAll(' ', '');
                 final exists = query.docs.any((doc) {
-                  final docName = (doc['name'] as String).toLowerCase().replaceAll(' ', '');
-                  return docName == normalizedInput && (test == null || doc.id != test['id']);
+                  final docName = (doc['name'] as String)
+                      .toLowerCase()
+                      .replaceAll(' ', '');
+                  return docName == normalizedInput &&
+                      (test == null || doc.id != test['id']);
                 });
                 if (exists) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("⚠️ Test name already exists")),
-                  );
+                      SnackBar(content: Text(t.translate('⚠️ Test name already exists'))));
                   return;
                 }
-
 
                 if (test == null) {
                   await testsCollection.add({
@@ -245,12 +400,11 @@ class _LabTestListProviderState extends State<LabTestListProvider> {
                     'description': desc,
                     'price': price,
                     'instructions': instructions,
-                    'labId': widget.labId, // ✅ استخدم labId الصحيح
+                    'labId': widget.labId,
                     'createdAt': FieldValue.serverTimestamp(),
                   });
                 } else {
                   await testsCollection.doc(test['id']).update({
-                    // 'name': name,
                     'description': desc,
                     'price': price,
                     'instructions': instructions,
@@ -259,11 +413,42 @@ class _LabTestListProviderState extends State<LabTestListProvider> {
 
                 Navigator.pop(context);
               },
-              child: Text(test == null ? "Add" : "Save"),
+              child: Text(test == null ? t.translate('Add') : t.translate('Save')),
             ),
+
+
           ],
         ),
       ),
+
     );
   }
+
+
+  Future<Map<String, dynamic>> _translateTestData(
+      Map<String, dynamic> test, String lang, GoogleTranslator translator) async {
+    if (lang == 'en') return test;
+
+    final name = await translator.translate(test['name'] ?? '', to: lang);
+    final desc = await translator.translate(test['description'] ?? '', to: lang);
+
+    final originalInstructions = List<String>.from(test['instructions'] ?? []);
+    final translatedInstructions = await Future.wait(
+      originalInstructions.map((i) async {
+        final translated = await translator.translate(i, to: lang);
+        return translated.text;
+      }),
+    );
+
+
+    return {
+      'name': name.text,
+      'description': desc.text,
+      'instructions': translatedInstructions,
+      'price': test['price'],
+    };
+
+
+  }
 }
+

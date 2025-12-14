@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'manage_medicines_screen.dart';
 import 'view_orders_screen.dart';
+import 'pharmacy_reports_screen.dart';
 import 'settings_screen.dart';
 import 'user_role.dart';
 import 'package:provider/provider.dart';
@@ -12,7 +13,8 @@ class PharmacyDashboardScreen extends StatefulWidget {
   const PharmacyDashboardScreen({super.key});
 
   @override
-  State<PharmacyDashboardScreen> createState() => _PharmacyDashboardScreenState();
+  State<PharmacyDashboardScreen> createState() =>
+      _PharmacyDashboardScreenState();
 }
 
 class _PharmacyDashboardScreenState extends State<PharmacyDashboardScreen> {
@@ -25,15 +27,20 @@ class _PharmacyDashboardScreenState extends State<PharmacyDashboardScreen> {
   }
 
   Future<void> _fetchStats() async {
-    final snapshot = await FirebaseFirestore.instance.collection('placedOrders').get();
+    final snapshot =
+    await FirebaseFirestore.instance.collection('placedOrders').get();
+
     int p = 0, a = 0, d = 0, r = 0;
+
     for (var doc in snapshot.docs) {
       final status = (doc['status'] ?? '').toString().toLowerCase();
-      if (status == "processing") p++;
+
+      if (status == "pending") p++;
       if (status == "approved") a++;
       if (status == "delivered") d++;
       if (status == "rejected") r++;
     }
+
     setState(() {
       processing = p;
       approved = a;
@@ -48,20 +55,25 @@ class _PharmacyDashboardScreenState extends State<PharmacyDashboardScreen> {
     final themeNotifier = Provider.of<ThemeNotifier>(context);
     final isDark = themeNotifier.isDarkMode;
 
-    final backgroundColor = isDark ? Colors.grey.shade900 : const Color(0xFFE3F2FD);
+    final backgroundColor =
+    isDark ? Colors.grey.shade900 : const Color(0xFFE3F2FD);
+    final headerGradient = isDark
+        ? [Colors.blueGrey.shade700, Colors.blueGrey.shade600]
+        : [const Color(0xFF2196F3), const Color(0xFF64B5F6)];
+
     final cardColor = isDark ? Colors.grey.shade800 : Colors.white;
-    final headerColor = isDark ? Colors.blueGrey.shade700 : const Color(0xFF42A5F5);
     final textColor = isDark ? Colors.white : Colors.black87;
 
     return Scaffold(
+      backgroundColor: backgroundColor,
       appBar: AppBar(
         backgroundColor: isDark ? Colors.grey.shade900 : Colors.blue,
         elevation: 0,
-        title: Text(
+        title: const Text(
           'MUYASSIR - Pharmacy',
           style: TextStyle(
             color: Colors.white,
-            fontSize: 24,
+            fontSize: 23,
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -71,170 +83,211 @@ class _PharmacyDashboardScreenState extends State<PharmacyDashboardScreen> {
             onPressed: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => const SettingsScreen(role: UserRole.pharmacy)),
+                MaterialPageRoute(
+                  builder: (_) =>
+                  const SettingsScreen(role: UserRole.pharmacy),
+                ),
               );
             },
           ),
         ],
       ),
-      backgroundColor: backgroundColor,
+
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // ✅ الهيدر
+            // ---------------- HEADER ----------------
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
               decoration: BoxDecoration(
-                color: headerColor,
-                borderRadius: BorderRadius.circular(16),
+                gradient: LinearGradient(
+                  colors: headerGradient,
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(18),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.18),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Text(
+                  const Text(
                     "Welcome back 👋",
                     style: TextStyle(
                       color: Colors.white,
-                      fontSize: 18,
+                      fontSize: 21,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 8),
                   Text(
                     user?.email ?? "Pharmacy",
                     style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
+                      fontSize: 17,
                       color: Colors.white,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    "This is your pharmacy dashboard. You can view orders, manage stock, chat with users, and more.",
+                  const SizedBox(height: 8),
+                  const Text(
+                    "Manage medicines, orders, and generate pharmacy reports.",
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: Colors.white,
+                      color: Colors.white70,
                       fontSize: 14,
-                      fontWeight: FontWeight.bold,
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 20),
 
-            // ✅ الأكشنات (كروت كبيرة)
+            const SizedBox(height: 30),
+
+            // ---------------- CARDS GRID ----------------
             GridView.count(
               crossAxisCount: 2,
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              crossAxisSpacing: 16,
-              mainAxisSpacing: 16,
+              crossAxisSpacing: 18,
+              mainAxisSpacing: 18,
               children: [
-                _buildActionTile(Icons.medication, "Manage Medicines", cardColor, textColor, () async {
-                  final user = FirebaseAuth.instance.currentUser;
-                  if (user == null) return;
-                  final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-                  if (doc.exists) {
-                    final data = doc.data() as Map<String, dynamic>;
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ManageMedicinesScreen(
-                          pharmacyId: doc.id,
-                          pharmacyName: data['companyName'] ?? 'Pharmacy',
+                _buildTile(
+                  icon: Icons.medication_liquid,
+                  label: "Manage Medicines",
+                  color: cardColor,
+                  textColor: textColor,
+                  onTap: () async {
+                    final user = FirebaseAuth.instance.currentUser;
+                    if (user == null) return;
+
+                    final doc = await FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(user.uid)
+                        .get();
+
+                    if (doc.exists) {
+                      final data = doc.data() as Map<String, dynamic>;
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ManageMedicinesScreen(
+                            pharmacyId: doc.id,
+                            pharmacyName: data['companyName'] ?? 'Pharmacy',
+                          ),
                         ),
-                      ),
-                    );
-                  }
-                }),
-                _buildActionTile(Icons.shopping_bag, "View Orders", cardColor, textColor, () async {
-                  final user = FirebaseAuth.instance.currentUser;
-                  if (user == null) return;
-                  final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-                  if (doc.exists) {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ViewOrdersScreen(pharmacyId: doc.id),
-                      ),
-                    );
-                  }
-                }),
-              ],
-            ),
-            const SizedBox(height: 20),
+                      );
+                    }
+                  },
+                ),
 
-            // ✅ الإحصائيات (كروت أصغر)
-            Row(
-              children: [
-                Expanded(child: _buildStatCard("Processing", processing, Colors.orange, Icons.hourglass_top, cardColor, textColor)),
-                const SizedBox(width: 12),
-                Expanded(child: _buildStatCard("Approved", approved, Colors.green, Icons.check_circle, cardColor, textColor)),
+                _buildTile(
+                  icon: Icons.shopping_bag_rounded,
+                  label: "View Orders",
+                  color: cardColor,
+                  textColor: textColor,
+                  onTap: () async {
+                    final user = FirebaseAuth.instance.currentUser;
+                    if (user == null) return;
+
+                    final doc = await FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(user.uid)
+                        .get();
+
+                    if (doc.exists) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              ViewOrdersScreen(pharmacyId: doc.id),
+                        ),
+                      );
+                    }
+                  },
+                ),
+
+                _buildTile(
+                  icon: Icons.bar_chart_rounded,
+                  label: "Reports",
+                  color: cardColor,
+                  textColor: textColor,
+                  onTap: () async {
+                    final user = FirebaseAuth.instance.currentUser;
+                    if (user == null) return;
+
+                    final doc = await FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(user.uid)
+                        .get();
+
+                    if (doc.exists) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              PharmacyReportsScreen(pharmacyId: doc.id),
+                        ),
+                      );
+                    }
+                  },
+                ),
               ],
             ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(child: _buildStatCard("Delivered", delivered, Colors.blue, Icons.local_shipping, cardColor, textColor)),
-                const SizedBox(width: 12),
-                Expanded(child: _buildStatCard("Rejected", rejected, Colors.red, Icons.cancel, cardColor, textColor)),
-              ],
-            ),
+
+            const SizedBox(height: 40),
           ],
         ),
       ),
     );
   }
 
-  // ✅ كارت إحصائيات
-  Widget _buildStatCard(String title, int count, Color color, IconData icon, Color cardColor, Color textColor) {
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      elevation: 3,
-      color: cardColor,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: color, size: 24),
-            const SizedBox(height: 8),
-            Text(title,
-                textAlign: TextAlign.center,
-                style: TextStyle(color: textColor, fontSize: 13, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 4),
-            Text("$count",
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: color)),
-          ],
-        ),
+  // ---------------- TILE BUILDER ----------------
+  Widget _buildTile({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required Color textColor,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black12,
+            offset: const Offset(0, 3),
+            blurRadius: 8,
+          ),
+        ],
       ),
-    );
-  }
-
-  // ✅ كارت أكشن
-  Widget _buildActionTile(IconData icon, String label, Color cardColor, Color textColor, VoidCallback onTap) {
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      elevation: 5,
-      color: cardColor,
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.all(22),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 40, color: Colors.blueAccent),
-              const SizedBox(height: 12),
-              Text(label,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: textColor)),
+              Icon(icon, size: 45, color: Colors.blueAccent),
+              const SizedBox(height: 14),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  color: textColor,
+                ),
+              ),
             ],
           ),
         ),

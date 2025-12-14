@@ -62,14 +62,25 @@ class _UserRequestsAndVisitsScreenState
   }
 
   Widget _buildRequestsTab(String status) {
+    final isDark = Theme
+        .of(context)
+        .brightness == Brightness.dark;
+    final backgroundColor = isDark ? const Color(0xFF121212) : null;
+    final gradient = isDark
+        ? null
+        : const LinearGradient(
+      colors: [Color(0xFFE3F2FD), Color(0xFFBBDEFB)],
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+    );
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
+
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Color(0xFFE3F2FD), Color(0xFFBBDEFB)],
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-        ),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        gradient: gradient,
       ),
       child: StreamBuilder<QuerySnapshot>(
         stream: requestsRef
@@ -87,7 +98,8 @@ class _UserRequestsAndVisitsScreenState
             return Center(
               child: Text(
                 "No $status requests found.",
-                style: const TextStyle(fontSize: 16, color: Colors.grey),
+                style: TextStyle(
+                    fontSize: 16, color: textColor.withOpacity(0.7)),
               ),
             );
           }
@@ -99,49 +111,70 @@ class _UserRequestsAndVisitsScreenState
             itemBuilder: (context, index) {
               final request = requests[index];
               final data = request.data() as Map<String, dynamic>;
+              final statusColor = _getStatusColor(data['status'] ?? status);
 
               return Card(
+                color: cardColor,
                 margin: const EdgeInsets.symmetric(vertical: 8),
-                elevation: 3,
+                elevation: isDark ? 1 : 3,
+                shadowColor: isDark ? Colors.black54 : Colors.grey,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16)),
+                  borderRadius: BorderRadius.circular(16),
+                ),
                 child: ListTile(
                   contentPadding:
                   const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   leading: CircleAvatar(
                     radius: 25,
-                    backgroundColor:
-                    _getStatusColor(data['status'] ?? status).withOpacity(0.2),
-                    child: Icon(Icons.person,
-                        color: _getStatusColor(data['status'] ?? status)),
+                    backgroundColor: statusColor.withOpacity(0.2),
+                    child: Icon(Icons.person, color: statusColor),
                   ),
                   title: Text(
                     data['userEmail'] ?? 'User',
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 16),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: textColor,
+                    ),
                   ),
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const SizedBox(height: 4),
-                      Text(
-                        "Service: ${data['serviceName'] != null && (data['services'] as List).isNotEmpty ? (data['services'] as List)[0]['name'] : 'Nursing Service'}",
-                        style: const TextStyle(fontSize: 14),
+                      Builder(
+                        builder: (_) {
+                          String serviceText = 'Nursing Service';
+                          if (data['services'] != null &&
+                              (data['services'] as List).isNotEmpty) {
+                            final servicesList = data['services'] as List;
+                            serviceText = servicesList
+                                .map((s) =>
+                            s['serviceName'] ?? s['name'] ?? 'Service')
+                                .join(', ');
+                          }
+                          return Text(
+                            "Service: $serviceText",
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: textColor.withOpacity(0.8),
+                            ),
+                          );
+                        },
                       ),
                       const SizedBox(height: 4),
                       Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                          color: _getStatusColor(data['status'] ?? status)
-                              .withOpacity(0.2),
+                          color: statusColor.withOpacity(0.2),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
                           data['status'] ?? status,
                           style: TextStyle(
-                              color: _getStatusColor(data['status'] ?? status),
-                              fontWeight: FontWeight.bold),
+                            color: statusColor,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                     ],
@@ -152,20 +185,21 @@ class _UserRequestsAndVisitsScreenState
                       bool? updated = await Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => HospitalRequestDetailsScreen(
-                            requestId: request.id,
-                            requestData: data,
-                          ),
+                          builder: (_) =>
+                              HospitalRequestDetailsScreen(
+                                requestId: request.id,
+                                requestData: data,
+                              ),
                         ),
                       );
-                      if (updated == true) {
-                        setState(() {}); // refresh after accept/reject
-                      }
+                      if (updated == true) setState(() {});
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.teal,
+                      foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                     child: const Text("View"),
                   ),
